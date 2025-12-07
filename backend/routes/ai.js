@@ -16,6 +16,13 @@ router.post('/summarize', authenticate, async (req, res, next) => {
     // Get OCR text from Mayan
     const ocrText = await mayanService.getOCRText(documentId);
 
+    if (ocrText === 'OCR_PROCESSING') {
+      return res.json({
+        summary: 'OCR processing in progress. Please check back later.',
+        keywords: []
+      });
+    }
+
     if (!ocrText || ocrText.trim().length === 0) {
       return res.json({
         summary: 'No OCR text available for this document.',
@@ -37,6 +44,13 @@ router.get('/summary/:documentId', authenticate, async (req, res, next) => {
   try {
     const { documentId } = req.params;
     const ocrText = await mayanService.getOCRText(documentId);
+
+    if (ocrText === 'OCR_PROCESSING') {
+      return res.json({
+        summary: 'OCR processing in progress. Please check back later.',
+        keywords: []
+      });
+    }
 
     if (!ocrText || ocrText.trim().length === 0) {
       return res.json({

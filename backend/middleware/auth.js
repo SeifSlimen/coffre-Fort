@@ -22,9 +22,19 @@ async function verifyToken(token) {
     }
 
     const key = await getKeyPromise(decoded.header);
+
+    // Accept both localhost (browser) and keycloak (internal) issuers
+    const validIssuers = [
+      `${process.env.KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`,
+      `http://localhost:8080/realms/${KEYCLOAK_REALM}`,
+      `http://127.0.0.1:8080/realms/${KEYCLOAK_REALM}`,
+      `http://localhost:8081/realms/${KEYCLOAK_REALM}`,
+      `http://127.0.0.1:8081/realms/${KEYCLOAK_REALM}`
+    ];
+
     const verified = jwt.verify(token, key, {
       algorithms: ['RS256'],
-      issuer: `${process.env.KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`
+      issuer: validIssuers
     });
 
     return verified;
@@ -43,12 +53,20 @@ function extractToken(req) {
 
 async function authenticate(req, res, next) {
   try {
+    console.log('[AUTH] Authenticating request to:', req.path);
+
     const token = extractToken(req);
     if (!token) {
+      console.log('[AUTH] No token found in request');
       return res.status(401).json({ error: 'No token provided' });
     }
 
+    console.log('[AUTH] Token found:', token.substring(0, 50) + '...');
+    console.log('[AUTH] Verifying token...');
+
     const decoded = await verifyToken(token);
+    console.log('[AUTH] Token verified successfully. User:', decoded.email);
+
     req.user = {
       id: decoded.sub,
       email: decoded.email,
@@ -58,6 +76,8 @@ async function authenticate(req, res, next) {
 
     next();
   } catch (error) {
+    console.error('[AUTH] Token verification failed:', error.message);
+    console.error('[AUTH] Error stack:', error.stack);
     return res.status(401).json({ error: 'Invalid or expired token', details: error.message });
   }
 }

@@ -2,186 +2,211 @@
 
 ## Prerequisites
 
-- Docker Desktop (Windows/Mac) or Docker Engine + Docker Compose (Linux)
-- At least 8GB RAM recommended
-- 10GB free disk space
+- **Docker Desktop** (Windows/Mac) or Docker Engine + Docker Compose (Linux)
+- **NVIDIA GPU** (optional) - For GPU-accelerated AI inference
+- **NVIDIA Container Toolkit** (if using GPU)
+- At least **8GB RAM** recommended
+- **15GB free disk space**
 
-## Quick Start
+## Installation
 
-1. **Clone or download the project**
+### 1. Clone the Repository
 
-2. **Start all services:**
-   ```bash
-   docker-compose up -d
-   ```
+```bash
+git clone https://github.com/SeifSlimen/coffre-Fort.git
+cd coffre-Fort
+```
 
-3. **Wait for services to start** (2-3 minutes):
-   - Keycloak: http://localhost:8080
-   - Mayan EDMS: http://localhost:8000
-   - Backend: http://localhost:5000
-   - Frontend: http://localhost:3000
+### 2. Start All Services
 
-4. **Pull Ollama model** (required for AI features):
-   ```bash
-   # Windows PowerShell
-   .\scripts\pull-ollama-model.ps1
-   
-   # Linux/Mac
-   chmod +x scripts/pull-ollama-model.sh
-   ./scripts/pull-ollama-model.sh
-   ```
+```bash
+docker-compose up -d
+```
 
-5. **Configure Keycloak** (if realm import didn't work):
-   - Access http://localhost:8080
-   - Login with admin/admin
-   - Create realm: `coffre-fort`
-   - Create clients: `coffre-fort-backend` and `coffre-fort-frontend`
-   - Create roles: `admin`, `user`
-   - Create test users:
-     - admin@test.com / admin123 (with admin role)
-     - user@test.com / user123 (with user role)
+Wait 2-3 minutes for all services to initialize.
 
-6. **Configure Mayan EDMS**:
-   - Access http://localhost:8000
-   - Login with admin/admin
-   - Create API token for backend (Settings → API)
-   - Enable OCR workflow
+### 3. Pull the AI Model
 
-7. **Access the application:**
-   - Open http://localhost:3000
-   - Login with test credentials
+```bash
+# Recommended model for RTX 3000/4000 series (8GB VRAM)
+docker exec coffre-fort-ollama ollama pull llama3.2:3b
 
-## Manual Configuration
+# Alternative lightweight model (4GB VRAM or less)
+docker exec coffre-fort-ollama ollama pull llama3.2:1b
+```
 
-### Keycloak Setup
+### 4. Access the Application
 
-1. Access Keycloak Admin Console: http://localhost:8080
-2. Login: admin / admin
-3. Create Realm:
-   - Click "Create Realm"
-   - Name: `coffre-fort`
-4. Create Client (Backend):
-   - Clients → Create Client
-   - Client ID: `coffre-fort-backend`
-   - Client Protocol: `openid-connect`
-   - Access Type: `public`
-   - Valid Redirect URIs: `http://localhost:3000/*`, `http://localhost:5000/*`
-   - Web Origins: `http://localhost:3000`, `http://localhost:5000`
-5. Create Client (Frontend):
-   - Same as above, Client ID: `coffre-fort-frontend`
-6. Create Roles:
-   - Realm Roles → Create Role
-   - Roles: `admin`, `user`
-7. Create Users:
-   - Users → Add User
-   - Username: `admin@test.com`
-   - Email: `admin@test.com`
-   - Credentials → Set Password: `admin123`
-   - Role Mappings → Assign `admin` and `user` roles
-   - Repeat for `user@test.com` with only `user` role
+| Service | URL | Username | Password |
+|---------|-----|----------|----------|
+| **Application** | http://localhost:3000 | admin@test.com | admin123 |
+| **Keycloak Admin** | http://localhost:8081 | admin | admin |
+| **Mayan EDMS** | http://localhost:8000 | admin | (see docker-compose.yml) |
 
-### Mayan EDMS Setup
+## Service Ports
 
-1. Access Mayan: http://localhost:8000
-2. Login: admin / admin
-3. Create API Token:
-   - Settings → REST API → API Tokens
-   - Create Token
-   - Copy token (update backend .env if needed)
-4. Enable OCR:
-   - Documents → Document Types
-   - Create or edit document type
-   - Enable OCR workflow
+| Service | External Port | Internal Port |
+|---------|---------------|---------------|
+| Frontend | 3000 | 80 |
+| Backend | 5000 | 5000 |
+| Mayan EDMS | 8000 | 8000 |
+| Keycloak | 8081 | 8080 |
+| Ollama | 5001 | 11434 |
+
+## GPU Configuration
+
+### With NVIDIA GPU (Recommended)
+
+The `docker-compose.yml` is configured for NVIDIA GPU by default:
+
+```yaml
+ollama:
+  runtime: nvidia
+  environment:
+    - NVIDIA_VISIBLE_DEVICES=all
+```
+
+Requirements:
+1. NVIDIA GPU (GTX 1060+ / RTX series)
+2. NVIDIA drivers installed
+3. NVIDIA Container Toolkit installed
+
+### Without GPU
+
+Comment out the GPU lines in `docker-compose.yml`:
+
+```yaml
+ollama:
+  # runtime: nvidia
+  # environment:
+  #   - NVIDIA_VISIBLE_DEVICES=all
+```
+
+Note: CPU inference will be slower (10-30x).
+
+## Changing the AI Model
+
+Edit `docker-compose.yml` and change `OLLAMA_MODEL`:
+
+```yaml
+backend:
+  environment:
+    OLLAMA_MODEL: llama3.2:3b  # Change this
+```
+
+Then restart the backend:
+
+```bash
+docker-compose up -d backend
+```
+
+### Available Models
+
+| Model | Size | VRAM Required | Speed |
+|-------|------|---------------|-------|
+| llama3.2:1b | 1.3GB | ~2GB | Very Fast |
+| llama3.2:3b | 2GB | ~3.5GB | Fast |
+| mistral:7b | 4GB | ~5.5GB | Medium |
+| llama3.1:8b | 4.7GB | ~6.5GB | Slower |
+
+## Test Users
+
+Pre-configured in Keycloak:
+
+| Role | Email | Password |
+|------|-------|----------|
+| Admin | admin@test.com | admin123 |
+| User | user@test.com | user123 |
+
+## Common Commands
+
+```bash
+# Start all services
+docker-compose up -d
+
+# Stop all services
+docker-compose down
+
+# View logs
+docker logs coffre-fort-backend
+docker logs coffre-fort-mayan
+docker logs coffre-fort-ollama
+
+# Restart a service
+docker-compose restart backend
+
+# Check Ollama models
+docker exec coffre-fort-ollama ollama list
+
+# Check GPU usage
+docker exec coffre-fort-ollama nvidia-smi
+```
 
 ## Troubleshooting
 
 ### Services Not Starting
 
 ```bash
-# Check service status
-docker ps
+# Check container status
+docker ps -a
 
-# Check logs
-docker logs coffre-fort-backend
-docker logs coffre-fort-frontend
-docker logs coffre-fort-keycloak
+# View detailed logs
 docker logs coffre-fort-mayan
-docker logs coffre-fort-ollama
+docker logs coffre-fort-keycloak
 ```
 
-### Keycloak Not Accessible
+### AI Summary Not Working
 
-- Wait 60 seconds for Keycloak to fully start
-- Check: `docker logs coffre-fort-keycloak`
-- Verify database connection
+1. Check if model is downloaded:
+   ```bash
+   docker exec coffre-fort-ollama ollama list
+   ```
 
-### Mayan Not Processing OCR
+2. Check backend logs:
+   ```bash
+   docker logs coffre-fort-backend | tail -20
+   ```
 
-- Check Celery workers: `docker logs coffre-fort-mayan`
-- Manually trigger OCR in Mayan UI
-- Wait 30-60 seconds after upload
+3. Verify model name matches `OLLAMA_MODEL` in docker-compose.yml
 
-### AI Service Not Working
+### OCR Not Processing
 
-- Verify Ollama model is pulled: `docker exec coffre-fort-ollama ollama list`
-- Check Ollama logs: `docker logs coffre-fort-ollama`
-- Pull model manually: `docker exec coffre-fort-ollama ollama pull llama3.2:1b`
+Wait 30-60 seconds after upload. Check worker logs:
 
-### Frontend Not Loading
-
-- Check backend is running: `curl http://localhost:5000/health`
-- Check browser console for errors
-- Verify environment variables in frontend/.env
+```bash
+docker logs coffre-fort-worker-fast
+```
 
 ### Port Conflicts
 
-If ports are already in use, modify `docker-compose.yml`:
-- Change port mappings (e.g., `3001:3000`)
+If a port is already in use, modify the external port in `docker-compose.yml`:
 
-## Development Mode
-
-### Backend Development
-
-```bash
-cd backend
-npm install
-npm run dev
+```yaml
+ports:
+  - "3001:80"  # Changed from 3000 to 3001
 ```
 
-### Frontend Development
+### GPU Not Detected
+
+1. Check NVIDIA drivers: `nvidia-smi`
+2. Check Container Toolkit: `docker run --rm --gpus all nvidia/cuda:12.0-base nvidia-smi`
+3. Restart Docker Desktop
+
+## Volume Persistence
+
+Data is persisted in Docker volumes:
+
+- `postgres_data` - Mayan database
+- `mayan_media` - Uploaded documents
+- `keycloak_db_data` - Keycloak database
+- `ollama_data` - AI models
+- `redis_data` - Task queue
+
+To reset all data:
 
 ```bash
-cd frontend
-npm install
-npm start
-```
-
-## Stopping Services
-
-```bash
-# Stop all services
-docker-compose down
-
-# Stop and remove volumes (WARNING: deletes data)
 docker-compose down -v
 ```
 
-## Reset Everything
-
-```bash
-# Stop and remove all containers, networks, and volumes
-docker-compose down -v
-
-# Remove images (optional)
-docker-compose down --rmi all
-
-# Start fresh
-docker-compose up -d
-```
-
-## Next Steps
-
-- See `docs/TESTING.md` for testing guide
-- See `docs/DEMO.md` for demo script
-- See `docs/API.md` for API documentation
+⚠️ This will delete all documents and users!
 

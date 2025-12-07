@@ -6,47 +6,69 @@
 # Start all services
 docker-compose up -d
 
-# Pull AI model (required)
-docker exec coffre-fort-ollama ollama pull llama3.2:1b
-
-# Access the application
-# Frontend: http://localhost:3000
-# Keycloak: http://localhost:8080 (admin/admin)
-# Mayan: http://localhost:8000 (admin/admin)
+# Pull AI model (required - wait for download)
+docker exec coffre-fort-ollama ollama pull llama3.2:3b
 ```
+
+Wait 2-3 minutes for services to initialize.
+
+## Access the Application
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| **Application** | http://localhost:3000 | admin@test.com / admin123 |
+| **Keycloak Admin** | http://localhost:8081 | admin / admin |
+| **Mayan EDMS** | http://localhost:8000 | admin / (see docker-compose.yml) |
 
 ## Test Users
 
-- **Admin:** admin@test.com / admin123
-- **User:** user@test.com / user123
+| Role | Email | Password |
+|------|-------|----------|
+| **Admin** | admin@test.com | admin123 |
+| **User** | user@test.com | user123 |
 
-## Key Commands
+## Essential Commands
 
 ```bash
-# View logs
+# View backend logs
 docker logs coffre-fort-backend
-docker logs coffre-fort-frontend
+
+# Check AI status
+docker exec coffre-fort-ollama ollama list
+
+# Check GPU usage
+docker exec coffre-fort-ollama nvidia-smi
 
 # Restart a service
-docker restart coffre-fort-backend
+docker-compose restart backend
 
 # Stop all services
 docker-compose down
-
-# Check service health
-curl http://localhost:5000/health
 ```
+
+## Quick Test
+
+1. Go to http://localhost:3000
+2. Login with `admin@test.com` / `admin123`
+3. Upload a PDF document
+4. Wait 30-60 seconds for OCR processing
+5. View the document - you should see:
+   - Document preview (pages as images)
+   - AI-generated summary in French
+   - Keywords (mots-clés)
 
 ## Troubleshooting
 
-1. **Services not starting?** Wait 2-3 minutes for all services to initialize
-2. **Keycloak not working?** Check logs: `docker logs coffre-fort-keycloak`
-3. **AI not working?** Verify model: `docker exec coffre-fort-ollama ollama list`
-4. **OCR not processing?** Wait 30-60 seconds after upload
+| Issue | Solution |
+|-------|----------|
+| "AI summary unavailable" | Check if model is downloaded: `docker exec coffre-fort-ollama ollama list` |
+| Document preview not loading | Wait for OCR processing, check worker logs |
+| Can't login | Wait for Keycloak to start, check port 8081 |
+| Services not starting | Run `docker-compose up -d` again |
 
 ## Next Steps
 
-- See `SETUP.md` for detailed setup
-- See `docs/TESTING.md` for testing guide
-- See `docs/DEMO.md` for demo script
+- See [SETUP.md](SETUP.md) for detailed configuration
+- See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system overview
+- See [docs/API.md](docs/API.md) for API documentation
 

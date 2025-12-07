@@ -1,36 +1,33 @@
-const MAYAN_URL = process.env.MAYAN_URL || 'http://mayan:8000';
+const MAYAN_URL = process.env.MAYAN_URL || 'http://localhost:8000';
 const MAYAN_USERNAME = process.env.MAYAN_USERNAME || 'admin';
-const MAYAN_PASSWORD = process.env.MAYAN_PASSWORD || 'admin';
+const MAYAN_PASSWORD = process.env.MAYAN_PASSWORD || 'eGnMEAatPd';
 
-let mayanToken = null;
-let tokenExpiry = null;
+const axios = require('axios');
 
-async function getMayanToken() {
-  // Return cached token if still valid
-  if (mayanToken && tokenExpiry && Date.now() < tokenExpiry) {
-    return mayanToken;
-  }
+async function makeMayanRequest(endpoint, method = 'GET', data = null) {
+  // Add logging to debug Mayan EDMS requests
+  console.log('Making Mayan request to:', `${MAYAN_URL}${endpoint}`);
+  console.log('Using creds:', MAYAN_USERNAME);
 
   try {
-    const axios = require('axios');
-    const response = await axios.post(`${MAYAN_URL}/api/v4/authentication/token/`, {
-      username: MAYAN_USERNAME,
-      password: MAYAN_PASSWORD
+    const response = await axios({
+      url: `${MAYAN_URL}${endpoint}`,
+      method,
+      auth: {
+        username: MAYAN_USERNAME,
+        password: MAYAN_PASSWORD
+      },
+      data
     });
-
-    mayanToken = response.data.token;
-    // Token expires in 1 hour, refresh 5 minutes before
-    tokenExpiry = Date.now() + (55 * 60 * 1000);
-
-    return mayanToken;
+    return response.data;
   } catch (error) {
-    console.error('Failed to get Mayan token:', error.message);
-    throw new Error('Failed to authenticate with Mayan EDMS');
+    console.error(`Failed to make request to Mayan endpoint ${endpoint}:`, error.response ? error.response.data : error.message);
+    throw new Error('Failed to communicate with Mayan EDMS');
   }
 }
 
 module.exports = {
   MAYAN_URL,
-  getMayanToken
+  makeMayanRequest
 };
 

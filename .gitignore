@@ -40,3 +40,13 @@ ollama_data/
 *.tmp
 *.temp
 
+# Debug/Log files
+*_logs*.txt
+debug_*.js
+test_*.py
+mayanknowledge.js
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

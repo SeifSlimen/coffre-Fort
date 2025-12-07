@@ -1,7 +1,9 @@
-version: '3.8'
+version: "3.9"
 
 services:
-  # Postgres Database for Mayan EDMS
+  # ---------------------------
+  # 1) MAYAN DATABASE
+  # ---------------------------
   postgres:
     image: postgres:15-alpine
     container_name: coffre-fort-postgres
@@ -19,79 +21,101 @@ services:
       timeout: 5s
       retries: 5
 
-  # Mayan EDMS
+  # ---------------------------
+  # 2) REDIS (REQUIRED FOR OCR)
+  # ---------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: coffre-fort-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - coffre-fort-network
+
+  # ---------------------------
+  # 3) MAYAN WEB SERVICE
+  # ---------------------------
   mayan:
-    image: mayanedms/mayanedms:latest
+    image: mayanedms/mayanedms
     container_name: coffre-fort-mayan
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     environment:
       MAYAN_DATABASE_ENGINE: django.db.backends.postgresql
       MAYAN_DATABASE_NAME: mayan
       MAYAN_DATABASE_USER: mayan
       MAYAN_DATABASE_PASSWORD: mayan_password
       MAYAN_DATABASE_HOST: postgres
-      MAYAN_DATABASE_PORT: 5432
-      MAYAN_DATABASE_CONN_MAX_AGE: 0
+
       MAYAN_CELERY_BROKER_URL: redis://redis:6379/0
       MAYAN_CELERY_RESULT_BACKEND: redis://redis:6379/0
+      
+      # Explicitly enable automatic OCR
+      MAYAN_DOCUMENTS_OCR_AUTO_OCR: "true"
+
     volumes:
       - mayan_media:/var/lib/mayan
     ports:
       - "8000:8000"
     networks:
       - coffre-fort-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
-  # Redis for Mayan Celery
-  redis:
-    image: redis:7-alpine
-    container_name: coffre-fort-redis
-    networks:
-      - coffre-fort-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Keycloak Identity Provider
-  keycloak:
-    image: quay.io/keycloak/keycloak:latest
-    container_name: coffre-fort-keycloak
-    command: start-dev --import-realm
+  # ---------------------------
+  # 4) MAYAN WORKERS
+  # ---------------------------
+  worker-fast:
+    image: mayanedms/mayanedms:latest
+    container_name: coffre-fort-worker-fast
+    command: run_worker worker_c
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-      KC_DB: postgres
-      KC_DB_URL_HOST: keycloak-db
-      KC_DB_URL_DATABASE: keycloak
-      KC_DB_USERNAME: keycloak
-      KC_DB_PASSWORD: keycloak_password
-      KC_HOSTNAME_STRICT: false
-      KC_HTTP_ENABLED: true
-    ports:
-      - "8080:8080"
+      MAYAN_DATABASE_ENGINE: django.db.backends.postgresql
+      MAYAN_DATABASE_NAME: mayan
+      MAYAN_DATABASE_USER: mayan
+      MAYAN_DATABASE_PASSWORD: mayan_password
+      MAYAN_DATABASE_HOST: postgres
+      MAYAN_CELERY_BROKER_URL: redis://redis:6379/0
+      MAYAN_CELERY_RESULT_BACKEND: redis://redis:6379/0
+      MAYAN_QUEUE_LIST: "converter,parsing,ocr,indexing,metadata,uploads,documents_file,documents_version"
+      MAYAN_WORKER_C_CONCURRENCY: 4
+      MAYAN_WORKER_LOG_LEVEL: INFO
     depends_on:
-      keycloak-db:
-        condition: service_healthy
+      - mayan
+      - redis
+      - postgres
+    volumes:
+      - mayan_media:/var/lib/mayan
     networks:
       - coffre-fort-network
-    volumes:
-      - ./keycloak/realm-config:/opt/keycloak/data/import
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
 
-  # Keycloak Database
+  worker-slow:
+    image: mayanedms/mayanedms:latest
+    container_name: coffre-fort-worker-slow
+    command: run_worker worker_d
+    environment:
+      MAYAN_DATABASE_ENGINE: django.db.backends.postgresql
+      MAYAN_DATABASE_NAME: mayan
+      MAYAN_DATABASE_USER: mayan
+      MAYAN_DATABASE_PASSWORD: mayan_password
+      MAYAN_DATABASE_HOST: postgres
+      MAYAN_CELERY_BROKER_URL: redis://redis:6379/0
+      MAYAN_CELERY_RESULT_BACKEND: redis://redis:6379/0
+      MAYAN_QUEUE_LIST: "checkouts_periodic,documents_downloads,documents_exports,documents_periodic,documents_trash,duplicates,duplicates_slow,events,events_slow,file_caching,file_caching_slow,indexing_slow,mailing,signatures,signatures_slow,sources,sources_periodic,statistics,storage,storage_periodic,tools,workflows,workflows_slow"
+      MAYAN_WORKER_D_CONCURRENCY: 2
+    depends_on:
+      - mayan
+      - redis
+      - postgres
+    volumes:
+      - mayan_media:/var/lib/mayan
+    networks:
+      - coffre-fort-network
+
+  # ---------------------------
+  # 5) KEYCLOAK DATABASE
+  # ---------------------------
   keycloak-db:
     image: postgres:15-alpine
     container_name: coffre-fort-keycloak-db
@@ -103,82 +127,110 @@ services:
       - keycloak_db_data:/var/lib/postgresql/data
     networks:
       - coffre-fort-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U keycloak"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
-  # Ollama AI Service
+  # ---------------------------
+  # 6) KEYCLOAK
+  # ---------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: coffre-fort-keycloak
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+
+      KC_DB: postgres
+      KC_DB_URL_HOST: keycloak-db
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak_password
+      KC_HOSTNAME_STRICT: false
+
+    depends_on:
+      keycloak-db:
+        condition: service_started
+
+    volumes:
+      - ./keycloak/realm-config:/opt/keycloak/data/import
+
+    ports:
+      - "8081:8080"
+    networks:
+      - coffre-fort-network
+
+  # ---------------------------
+  # 7) OLLAMA (with GPU support)
+  # ---------------------------
   ollama:
     image: ollama/ollama:latest
     container_name: coffre-fort-ollama
     ports:
-      - "11434:11434"
+      - "5001:11434"
     volumes:
       - ollama_data:/root/.ollama
     networks:
       - coffre-fort-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+    # GPU support - requires NVIDIA Container Toolkit
+    # Uncomment the following if you have issues:
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
 
-  # Backend API
+  # ---------------------------
+  # 8) BACKEND API (Node.js)
+  # ---------------------------
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
     container_name: coffre-fort-backend
     environment:
       NODE_ENV: production
       PORT: 5000
+
+      MAYAN_URL: http://mayan:8000
+      MAYAN_USERNAME: admin
+      MAYAN_PASSWORD: eGnMEAatPd
+
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3.2:3b
+
       KEYCLOAK_URL: http://keycloak:8080
       KEYCLOAK_REALM: coffre-fort
       KEYCLOAK_CLIENT_ID: coffre-fort-backend
-      MAYAN_URL: http://mayan:8000
-      MAYAN_USERNAME: admin
-      MAYAN_PASSWORD: admin
-      OLLAMA_URL: http://ollama:11434
-      OLLAMA_MODEL: llama3.2:1b
+      # KEYCLOAK_CLIENT_SECRET: backend-secret-placeholder
+      # NOTE: The backend currently uses public client access or bearer token validation
+      # which doesn't strictly require a secret if configured as public/bearer-only.
+      # However, if you change it to confidential, you MUST put the secret here.
+      KEYCLOAK_CLIENT_SECRET: "" 
+
     ports:
       - "5000:5000"
+
     depends_on:
-      keycloak:
-        condition: service_healthy
-      mayan:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
+      - mayan
+      - keycloak
+      - ollama
+
     networks:
       - coffre-fort-network
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
 
-  # Frontend React App
+  # ---------------------------
+  # 9) FRONTEND (React)
+  # ---------------------------
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
     container_name: coffre-fort-frontend
-    environment:
-      REACT_APP_API_URL: http://localhost:5000
-      REACT_APP_KEYCLOAK_URL: http://localhost:8080
-      REACT_APP_KEYCLOAK_REALM: coffre-fort
-      REACT_APP_KEYCLOAK_CLIENT_ID: coffre-fort-frontend
     ports:
-      - "3000:3000"
+      - "3000:80"
     depends_on:
       - backend
-      - keycloak
     networks:
       - coffre-fort-network
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
 
+# ---------------------------
+# NETWORKS + VOLUMES
+# ---------------------------
 networks:
   coffre-fort-network:
     driver: bridge
@@ -188,4 +240,4 @@ volumes:
   mayan_media:
   keycloak_db_data:
   ollama_data:
-
+  redis_data:

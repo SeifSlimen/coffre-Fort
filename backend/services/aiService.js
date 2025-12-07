@@ -33,7 +33,7 @@ class AIService {
   async generateSummary(text) {
     if (!text || text.trim().length === 0) {
       return {
-        summary: 'No text content available for summarization.',
+        summary: 'Aucun contenu textuel disponible pour le résumé.',
         keywords: []
       };
     }
@@ -45,14 +45,16 @@ class AIService {
     }
 
     try {
-      const prompt = `Summarize the following document in 3-4 sentences and extract 5 key keywords.
+      const prompt = `Tu es un assistant spécialisé dans l'analyse de documents. Analyse le document suivant et fournis:
+1. Un résumé concis en 3-4 phrases décrivant le contenu principal du document
+2. Les 5 mots-clés les plus importants qui caractérisent ce document
 
 Document:
-${text.substring(0, 4000)} 
+${text.substring(0, 4000)}
 
-Format your response as:
-Summary: [your summary here]
-Keywords: [keyword1, keyword2, keyword3, keyword4, keyword5]`;
+Réponds EXACTEMENT dans ce format:
+Résumé: [ton résumé ici]
+Mots-clés: [mot1, mot2, mot3, mot4, mot5]`;
 
       const response = await axios.post(
         `${OLLAMA_URL}/api/generate`,
@@ -63,10 +65,10 @@ Keywords: [keyword1, keyword2, keyword3, keyword4, keyword5]`;
           options: {
             temperature: 0.7,
             top_p: 0.9,
-            max_tokens: 500
+            num_predict: 500
           }
         },
-        { timeout: 60000 } // 60 seconds timeout
+        { timeout: 120000 } // 120 seconds timeout for slower models
       );
 
       const result = this.parseAIResponse(response.data.response || '');
@@ -79,7 +81,7 @@ Keywords: [keyword1, keyword2, keyword3, keyword4, keyword5]`;
       console.error('AI service error:', error.message);
       if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
         return {
-          summary: 'AI service is currently unavailable. Please try again later.',
+          summary: 'Le service IA est temporairement indisponible. Veuillez réessayer plus tard.',
           keywords: []
         };
       }
@@ -88,8 +90,9 @@ Keywords: [keyword1, keyword2, keyword3, keyword4, keyword5]`;
   }
 
   parseAIResponse(response) {
-    const summaryMatch = response.match(/Summary:\s*(.+?)(?=Keywords:|$)/is);
-    const keywordsMatch = response.match(/Keywords:\s*(.+?)$/is);
+    // Support both French and English formats
+    const summaryMatch = response.match(/(?:Résumé|Summary):\s*(.+?)(?=(?:Mots-clés|Keywords):|$)/is);
+    const keywordsMatch = response.match(/(?:Mots-clés|Keywords):\s*(.+?)$/is);
 
     let summary = summaryMatch ? summaryMatch[1].trim() : response.split('\n')[0].trim();
     let keywords = [];
@@ -99,20 +102,20 @@ Keywords: [keyword1, keyword2, keyword3, keyword4, keyword5]`;
       // Extract keywords from comma-separated or line-separated list
       keywords = keywordsStr
         .split(/[,\n]/)
-        .map(k => k.trim().replace(/^[-•]\s*/, ''))
-        .filter(k => k.length > 0)
+        .map(k => k.trim().replace(/^[-•\[\]]\s*/, '').replace(/[\[\]]/g, ''))
+        .filter(k => k.length > 0 && k.length < 50)
         .slice(0, 5);
     }
 
-    // If no keywords found, try to extract from summary
+    // If no keywords found, try to extract important words from summary
     if (keywords.length === 0) {
       const words = summary.toLowerCase().match(/\b\w{4,}\b/g) || [];
       keywords = [...new Set(words)].slice(0, 5);
     }
 
     return {
-      summary: summary || 'Unable to generate summary.',
-      keywords: keywords.length > 0 ? keywords : ['document', 'text', 'content']
+      summary: summary || 'Impossible de générer un résumé.',
+      keywords: keywords.length > 0 ? keywords : ['document', 'contenu', 'texte']
     };
   }
 

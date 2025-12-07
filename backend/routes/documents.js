@@ -60,7 +60,7 @@ router.get('/', authenticate, async (req, res, next) => {
     const limit = parseInt(req.query.limit) || 10;
 
     const response = await mayanService.getDocumentList(page, limit);
-    
+
     // Filter documents based on user access
     const documents = response.results.map(doc => ({
       id: doc.id,
@@ -98,8 +98,10 @@ router.get('/:id', authenticate, async (req, res, next) => {
     // Get AI summary (with caching)
     let summary = null;
     let keywords = [];
-    
-    if (ocrText && ocrText.trim().length > 0) {
+
+    if (ocrText === 'OCR_PROCESSING') {
+      summary = 'OCR processing in progress. Please check back later.';
+    } else if (ocrText && ocrText.trim().length > 0) {
       try {
         const aiResult = await aiService.generateSummary(ocrText);
         summary = aiResult.summary;
@@ -115,7 +117,7 @@ router.get('/:id', authenticate, async (req, res, next) => {
     res.json({
       id: document.id,
       title: document.label,
-      ocrText: ocrText || 'No OCR text available',
+      ocrText: ocrText,
       summary,
       keywords,
       metadata: {
@@ -152,11 +154,15 @@ router.get('/:id/download', authenticate, async (req, res, next) => {
       return res.status(403).json({ error: 'Access denied to this document' });
     }
 
-    const stream = await mayanService.downloadDocument(documentId);
     const document = await mayanService.getDocument(documentId);
+    const stream = await mayanService.downloadDocument(documentId);
+    
     const filename = document.label || `document-${documentId}.pdf`;
+    const mimeType = document.file_latest?.mimetype || 'application/pdf';
 
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', mimeType);
+    
     stream.pipe(res);
   } catch (error) {
     next(error);

@@ -2,60 +2,70 @@
 
 A containerized microservices document management system with AI-powered summarization, OCR capabilities, and SSO authentication.
 
-## Architecture
+## 🏗️ Architecture
 
-- **Frontend**: React web client (Port 3000)
-- **Backend**: Express/Node.js API gateway (Port 5000)
-- **Mayan EDMS**: Document management and OCR (Port 8000)
-- **Postgres**: Database for Mayan EDMS (Port 5432)
-- **Ollama**: Local AI/LLM service for summarization (Port 11434)
-- **Keycloak**: Identity provider for SSO (Port 8080)
+| Service | Technology | Port | Description |
+|---------|------------|------|-------------|
+| **Frontend** | React 18 | 3000 | Web client with Keycloak SSO |
+| **Backend** | Express/Node.js | 5000 | API gateway with JWT validation |
+| **Mayan EDMS** | Python/Django | 8000 | Document management & OCR |
+| **Ollama** | Go/LLM | 5001 | AI summarization (GPU accelerated) |
+| **Keycloak** | Java | 8081 | Identity provider (SSO) |
+| **PostgreSQL** | Database | 5432 | Data storage |
+| **Redis** | Cache | 6379 | Task queue for OCR workers |
 
-## Quick Start
+## ✨ Features
 
-1. Clone the repository
-2. Copy `.env.example` to `.env` (optional, defaults are set)
-3. Run the entire stack:
+- **📄 Document Management** - Upload, view, and organize documents
+- **🔍 OCR Processing** - Automatic text extraction from PDFs/images
+- **🤖 AI Summarization** - French summaries with keywords (mots-clés)
+- **🔐 SSO Authentication** - Keycloak-based single sign-on
+- **👥 Role-Based Access** - Admin and user roles
+- **🎮 GPU Acceleration** - NVIDIA GPU support for fast AI inference
 
-```bash
-docker-compose up
-```
+## 🚀 Quick Start
 
-4. Access the services:
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:5000
-   - Mayan EDMS: http://localhost:8000 (admin/admin)
-   - Keycloak: http://localhost:8080 (admin/admin)
+### Prerequisites
 
-## Initial Setup
+- Docker Desktop with WSL2 (Windows) or Docker Engine (Linux)
+- NVIDIA GPU + NVIDIA Container Toolkit (optional, for GPU acceleration)
+- 8GB RAM minimum
+- 15GB free disk space
 
-### Keycloak Configuration
-
-1. Access Keycloak admin console: http://localhost:8080
-2. Login with admin/admin
-3. Create realm: `coffre-fort`
-4. Create client: `coffre-fort-backend` (Public client)
-5. Create roles: `admin`, `user`
-6. Create test users:
-   - admin@test.com / admin123 (with admin role)
-   - user@test.com / user123 (with user role)
-
-### Mayan EDMS Configuration
-
-1. Access Mayan: http://localhost:8000
-2. Login with admin/admin
-3. Create API token for backend authentication
-4. Enable OCR workflow
-
-### Ollama Model Setup
-
-The first time you run, pull the AI model:
+### Start the Application
 
 ```bash
-docker exec coffre-fort-ollama ollama pull llama3.2:1b
+# Clone the repository
+git clone https://github.com/SeifSlimen/coffre-Fort.git
+cd coffre-Fort
+
+# Start all services
+docker-compose up -d
+
+# Wait 2-3 minutes for services to initialize
+
+# Pull the AI model (required for summarization)
+docker exec coffre-fort-ollama ollama pull llama3.2:3b
 ```
 
-## Development
+### Access the Application
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| **Application** | http://localhost:3000 | admin@test.com / admin123 |
+| **Keycloak Admin** | http://localhost:8081 | admin / admin |
+| **Mayan EDMS** | http://localhost:8000 | admin / (see docker-compose.yml) |
+
+## 📖 Documentation
+
+- [SETUP.md](SETUP.md) - Detailed setup instructions
+- [QUICKSTART.md](QUICKSTART.md) - Quick start guide
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture
+- [docs/API.md](docs/API.md) - API documentation
+- [docs/TESTING.md](docs/TESTING.md) - Testing guide
+- [docs/DEMO.md](docs/DEMO.md) - Demo script
+
+## 🛠️ Development
 
 ### Backend Development
 
@@ -73,15 +83,60 @@ npm install
 npm start
 ```
 
-## API Endpoints
+## 🔧 Configuration
 
-See `docs/API.md` for complete API documentation.
+### GPU Support (NVIDIA)
 
-## Demo
+GPU acceleration is enabled by default for Ollama. Requirements:
+- NVIDIA GPU (RTX 3000/4000 series recommended)
+- NVIDIA Container Toolkit installed
+- Docker Desktop with GPU support enabled
 
-See `docs/DEMO.md` for demo script and presentation checklist.
+If you don't have a GPU, comment out the `runtime: nvidia` line in `docker-compose.yml`.
 
-## License
+### AI Model Options
 
-MIT
+| Model | VRAM | Speed | Quality |
+|-------|------|-------|---------|
+| llama3.2:1b | ~2GB | Fast | Good |
+| llama3.2:3b | ~3.5GB | Medium | Better |
+| mistral:7b | ~5.5GB | Slower | Best |
+
+Change the model in `docker-compose.yml` under `OLLAMA_MODEL`.
+
+## 📁 Project Structure
+
+```
+coffre-Fort/
+├── backend/           # Node.js API server
+│   ├── config/        # Configuration files
+│   ├── middleware/    # Auth middleware
+│   ├── routes/        # API routes
+│   ├── services/      # Business logic
+│   └── utils/         # Utilities
+├── frontend/          # React web client
+│   ├── public/        # Static files
+│   └── src/           # React components
+├── keycloak/          # Keycloak realm config
+├── scripts/           # Utility scripts
+├── docs/              # Documentation
+└── docker-compose.yml # Container orchestration
+```
+
+## 🔒 Security Notes
+
+⚠️ **For Production Deployment:**
+- Change all default passwords
+- Use HTTPS with proper certificates
+- Configure Keycloak for production mode
+- Set up proper backup for volumes
+- Review and restrict CORS settings
+
+## 📄 License
+
+MIT License
+
+## 👤 Author
+
+Seif Slimen
 

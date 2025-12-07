@@ -1,10 +1,10 @@
-# PowerShell script to pull Ollama model for the hackathon demo
+# PowerShell script to pull Ollama model for Coffre-Fort
 # Run this after starting docker-compose
 
-Write-Host "Pulling Ollama model: llama3.2:1b" -ForegroundColor Cyan
-Write-Host "This may take a few minutes..." -ForegroundColor Yellow
+Write-Host "Pulling Ollama model: llama3.2:3b" -ForegroundColor Cyan
+Write-Host "This may take a few minutes (about 2GB download)..." -ForegroundColor Yellow
 
-docker exec coffre-fort-ollama ollama pull llama3.2:1b
+docker exec coffre-fort-ollama ollama pull llama3.2:3b
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Model pulled successfully!" -ForegroundColor Green

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { API_URL } from '../utils/constants';
-import { getToken, updateToken } from './auth';
+import { getToken, updateToken, isAuthenticated } from './auth';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -12,13 +12,30 @@ const api = axios.create({
 // Request interceptor to add token
 api.interceptors.request.use(
   async (config) => {
-    try {
-      const token = await updateToken();
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+    console.log('[API] Making request to:', config.url);
+
+    if (isAuthenticated()) {
+      console.log('[API] User is authenticated, getting token...');
+      try {
+        // Update token if needed (refreshes if expiring soon)
+        const token = await updateToken();
+        console.log('[API] Token obtained:', token ? token.substring(0, 20) + '...' : 'null');
+
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+      } catch (err) {
+        console.error('[API] Failed to update token:', err);
+        // Fallback to current token if refresh fails
+        const fallbackToken = getToken();
+        console.log('[API] Using fallback token:', fallbackToken ? fallbackToken.substring(0, 20) + '...' : 'null');
+
+        if (fallbackToken) {
+          config.headers.Authorization = `Bearer ${fallbackToken}`;
+        }
       }
-    } catch (error) {
-      console.error('Failed to get token:', error);
+    } else {
+      console.log('[API] User not authenticated');
     }
     return config;
   },
@@ -32,6 +49,7 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     if (error.response?.status === 401) {
+      console.error('[API] 401 Unauthorized - redirecting to login');
       // Token expired or invalid, redirect to login
       window.location.href = '/';
     }
@@ -50,7 +68,7 @@ export const uploadDocument = (file, title, description) => {
   formData.append('file', file);
   if (title) formData.append('title', title);
   if (description) formData.append('description', description);
-  
+
   return api.post('/api/documents/upload', formData, {
     headers: {
       'Content-Type': 'multipart/form-data'
@@ -58,33 +76,33 @@ export const uploadDocument = (file, title, description) => {
   });
 };
 
-export const getDocuments = (page = 1, limit = 10) => 
+export const getDocuments = (page = 1, limit = 10) =>
   api.get(`/api/documents?page=${page}&limit=${limit}`);
 
-export const getDocument = (id) => 
+export const getDocument = (id) =>
   api.get(`/api/documents/${id}`);
 
-export const deleteDocument = (id) => 
+export const deleteDocument = (id) =>
   api.delete(`/api/documents/${id}`);
 
-export const downloadDocument = (id) => 
+export const downloadDocument = (id) =>
   api.get(`/api/documents/${id}/download`, { responseType: 'blob' });
 
 // AI endpoints
-export const getSummary = (documentId) => 
+export const getSummary = (documentId) =>
   api.post('/api/ai/summarize', { documentId });
 
-export const getCachedSummary = (documentId) => 
+export const getCachedSummary = (documentId) =>
   api.get(`/api/ai/summary/${documentId}`);
 
 // Admin endpoints
-export const getUsers = () => 
+export const getUsers = () =>
   api.get('/api/admin/users');
 
-export const grantAccess = (userId, documentId, expiresAt) => 
+export const grantAccess = (userId, documentId, expiresAt) =>
   api.post('/api/admin/access', { userId, documentId, expiresAt });
 
-export const revokeAccess = (userId, documentId) => 
+export const revokeAccess = (userId, documentId) =>
   api.delete(`/api/admin/access/${userId}/${documentId}`);
 
 export default api;

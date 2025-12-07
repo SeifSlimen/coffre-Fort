@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Script to pull Ollama model for the hackathon demo
+# Script to pull Ollama model for Coffre-Fort
 # Run this after starting docker-compose
 
-echo "Pulling Ollama model: llama3.2:1b"
-echo "This may take a few minutes..."
+echo "Pulling Ollama model: llama3.2:3b"
+echo "This may take a few minutes (about 2GB download)..."
 
-docker exec coffre-fort-ollama ollama pull llama3.2:1b
+docker exec coffre-fort-ollama ollama pull llama3.2:3b
 
 if [ $? -eq 0 ]; then
     echo "Model pulled successfully!"
