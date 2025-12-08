@@ -45,15 +45,15 @@ class AIService {
     }
 
     try {
-      const prompt = `Tu es un assistant spécialisé dans l'analyse de documents. Analyse le document suivant et fournis:
-1. Un résumé concis en 3-4 phrases décrivant le contenu principal du document
-2. Les 5 mots-clés les plus importants qui caractérisent ce document
+      const prompt = `Tu es un assistant spécialisé dans l'analyse de documents. Analyse le document suivant et fournis un résumé et des mots-clés.
 
-Document:
+IMPORTANT: Ne pas utiliser de formatage markdown (pas de ** ou #). Répondre en texte simple.
+
+Document à analyser:
 ${text.substring(0, 4000)}
 
-Réponds EXACTEMENT dans ce format:
-Résumé: [ton résumé ici]
+Réponds dans ce format exact (texte simple, pas de markdown):
+Résumé: [Écris ici un résumé concis de 3-4 phrases décrivant le contenu principal]
 Mots-clés: [mot1, mot2, mot3, mot4, mot5]`;
 
       const response = await axios.post(
@@ -90,27 +90,61 @@ Mots-clés: [mot1, mot2, mot3, mot4, mot5]`;
   }
 
   parseAIResponse(response) {
-    // Support both French and English formats
-    const summaryMatch = response.match(/(?:Résumé|Summary):\s*(.+?)(?=(?:Mots-clés|Keywords):|$)/is);
-    const keywordsMatch = response.match(/(?:Mots-clés|Keywords):\s*(.+?)$/is);
+    // Clean up markdown formatting from the response
+    let cleanResponse = response
+      .replace(/\*\*([^*]+)\*\*/g, '$1')  // Remove **bold**
+      .replace(/\*([^*]+)\*/g, '$1')       // Remove *italic*
+      .replace(/^#+\s*/gm, '')              // Remove # headers
+      .replace(/^[-•]\s*/gm, '')            // Remove bullet points at line start
+      .trim();
 
-    let summary = summaryMatch ? summaryMatch[1].trim() : response.split('\n')[0].trim();
+    // First, try to extract keywords section (to remove it from summary extraction)
+    const keywordsMatch = cleanResponse.match(/(?:Mots[- ]cl[ée]s|Keywords)\s*:\s*(.+?)$/is);
+    
+    // Remove keywords section from response for cleaner summary extraction
+    let textWithoutKeywords = cleanResponse;
+    if (keywordsMatch) {
+      textWithoutKeywords = cleanResponse.replace(keywordsMatch[0], '').trim();
+    }
+    
+    // Remove the "Résumé:" prefix and any variations - use . to match accented chars reliably
+    let summary = textWithoutKeywords
+      .replace(/^R.sum.\s*(?:en\s+fran.ais)?\s*:\s*/gim, '')  // Résumé:, Resume:
+      .replace(/^Summary\s*:\s*/gim, '')
+      .replace(/\nR.sum.\s*:\s*/gi, '\n')  // Also in the middle of text
+      .trim();
+    
+    // If still has multiple lines, join them nicely
+    summary = summary.split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 0)
+      .join(' ')
+      .substring(0, 1000);
+
     let keywords = [];
 
-    if (keywordsMatch) {
+    if (keywordsMatch && keywordsMatch[1]) {
       const keywordsStr = keywordsMatch[1].trim();
-      // Extract keywords from comma-separated or line-separated list
+      // Extract keywords from comma-separated, line-separated, or numbered list
       keywords = keywordsStr
         .split(/[,\n]/)
-        .map(k => k.trim().replace(/^[-•\[\]]\s*/, '').replace(/[\[\]]/g, ''))
-        .filter(k => k.length > 0 && k.length < 50)
+        .map(k => k.trim()
+          .replace(/^[-•\d.)\]]\s*/, '')  // Remove bullets and numbers
+          .replace(/[\[\]]/g, '')          // Remove brackets
+          .replace(/^\d+\.\s*/, '')        // Remove "1. " format
+        )
+        .filter(k => k.length > 1 && k.length < 50)
         .slice(0, 5);
     }
 
-    // If no keywords found, try to extract important words from summary
-    if (keywords.length === 0) {
-      const words = summary.toLowerCase().match(/\b\w{4,}\b/g) || [];
-      keywords = [...new Set(words)].slice(0, 5);
+    // If no keywords found, extract important words from summary
+    if (keywords.length === 0 && summary) {
+      // French stop words to exclude
+      const stopWords = ['dans', 'pour', 'avec', 'cette', 'sont', 'être', 'avoir', 'fait', 'plus', 'comme', 'tout', 'mais', 'aussi', 'leur', 'leurs', 'elle', 'elles', 'nous', 'vous'];
+      const words = summary.toLowerCase().match(/\b[a-zàâäéèêëïîôùûüç]{5,}\b/gi) || [];
+      keywords = [...new Set(words)]
+        .filter(w => !stopWords.includes(w.toLowerCase()))
+        .slice(0, 5);
     }
 
     return {

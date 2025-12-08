@@ -14,8 +14,11 @@ api.interceptors.request.use(
   async (config) => {
     console.log('[API] Making request to:', config.url);
 
-    if (isAuthenticated()) {
-      console.log('[API] User is authenticated, getting token...');
+    // Always try to get a token if we have one stored
+    const currentToken = getToken();
+    
+    if (currentToken) {
+      console.log('[API] Token found, checking if refresh needed...');
       try {
         // Update token if needed (refreshes if expiring soon)
         const token = await updateToken();
@@ -26,16 +29,12 @@ api.interceptors.request.use(
         }
       } catch (err) {
         console.error('[API] Failed to update token:', err);
-        // Fallback to current token if refresh fails
-        const fallbackToken = getToken();
-        console.log('[API] Using fallback token:', fallbackToken ? fallbackToken.substring(0, 20) + '...' : 'null');
-
-        if (fallbackToken) {
-          config.headers.Authorization = `Bearer ${fallbackToken}`;
-        }
+        // Use current token as fallback - let the server reject if invalid
+        console.log('[API] Using current token as fallback');
+        config.headers.Authorization = `Bearer ${currentToken}`;
       }
     } else {
-      console.log('[API] User not authenticated');
+      console.log('[API] No token available');
     }
     return config;
   },
@@ -99,11 +98,29 @@ export const getCachedSummary = (documentId) =>
 export const getUsers = () =>
   api.get('/api/admin/users');
 
-export const grantAccess = (userId, documentId, expiresAt) =>
-  api.post('/api/admin/access', { userId, documentId, expiresAt });
+export const createUser = (userData) =>
+  api.post('/api/admin/users', userData);
+
+export const updateUser = (userId, userData) =>
+  api.put(`/api/admin/users/${userId}`, userData);
+
+export const deleteUser = (userId) =>
+  api.delete(`/api/admin/users/${userId}`);
+
+export const getRoles = () =>
+  api.get('/api/admin/roles');
+
+export const getPermissionTypes = () =>
+  api.get('/api/admin/permission-types');
+
+export const grantAccess = (userId, documentId, expiresAt, permissions) =>
+  api.post('/api/admin/access', { userId, documentId, expiresAt, permissions });
 
 export const revokeAccess = (userId, documentId) =>
   api.delete(`/api/admin/access/${userId}/${documentId}`);
+
+export const getAccessGrants = () =>
+  api.get('/api/admin/access-grants');
 
 export default api;
 

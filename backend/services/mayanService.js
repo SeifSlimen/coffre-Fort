@@ -3,7 +3,7 @@ const FormData = require('form-data');
 const { MAYAN_URL } = require('../config/mayan');
 
 const MAYAN_USERNAME = process.env.MAYAN_USERNAME || 'admin';
-const MAYAN_PASSWORD = process.env.MAYAN_PASSWORD || 'eGnMEAatPd';
+const MAYAN_PASSWORD = process.env.MAYAN_PASSWORD || 'admin123';
 
 class MayanService {
   async makeRequest(method, endpoint, data = null, headers = {}) {
@@ -93,62 +93,46 @@ class MayanService {
 
   async getOCRText(documentId) {
     try {
-      // 1. Get document to find the latest file
+      // 1. Get document to find the active version
       const document = await this.getDocument(documentId);
 
-      let file = document.file_latest;
-
-      // If no latest file, check the file list
-      if (!file) {
-        const fileList = await this.makeRequest('get', `/api/v4/documents/${documentId}/files/`);
-        if (fileList.results && fileList.results.length > 0) {
-          file = fileList.results[0];
-        }
-      }
-
-      if (!file) {
-        console.warn(`No file found for document ${documentId}`);
+      const version = document.version_active;
+      if (!version) {
+        console.warn(`No active version found for document ${documentId}`);
         return null;
       }
 
-      // 2. Get pages for the file (with pagination)
+      // 2. Get version pages
       let allPages = [];
-      let pageUrl = file.page_list_url || `/api/v4/documents/${documentId}/files/${file.id}/pages/`;
+      let pageUrl = `/api/v4/documents/${documentId}/versions/${version.id}/pages/`;
       
-      // Limit to avoid infinite loops, though unlikely with Mayan's pagination
       let loopCount = 0;
-      const MAX_LOOPS = 50; 
+      const MAX_LOOPS = 50;
 
       while (pageUrl && loopCount < MAX_LOOPS) {
-          const pagesList = await this.makeRequest('get', pageUrl);
-          if (pagesList.results) {
-              allPages = allPages.concat(pagesList.results);
-          }
-          pageUrl = pagesList.next;
-          loopCount++;
+        const pagesList = await this.makeRequest('get', pageUrl);
+        if (pagesList.results) {
+          allPages = allPages.concat(pagesList.results);
+        }
+        pageUrl = pagesList.next;
+        loopCount++;
       }
 
       if (allPages.length === 0) {
-        console.warn(`No pages found for file ${file.id}. Pages might be generating.`);
+        console.warn(`No pages found for version ${version.id}. Pages might be generating.`);
         return 'OCR_PROCESSING';
       }
 
-      // 3. Get the document version for OCR (OCR is on version pages, not file pages)
-      const versions = await this.makeRequest('get', `/api/v4/documents/${documentId}/versions/`);
-      if (!versions.results || versions.results.length === 0) {
-        console.warn(`No versions found for document ${documentId}`);
-        return 'OCR_PROCESSING';
-      }
-      const latestVersion = versions.results.find(v => v.active) || versions.results[0];
-
-      // 4. Get OCR for each page using the version page OCR endpoint
+      // 3. Get OCR for each page using version page OCR endpoint
       const ocrTexts = [];
 
       for (const page of allPages) {
         try {
-          // OCR endpoint is: /api/v4/documents/{doc_id}/versions/{version_id}/pages/{page_id}/ocr/
-          const ocrUrl = `/api/v4/documents/${documentId}/versions/${latestVersion.id}/pages/${page.id}/ocr/`;
+          // The correct OCR endpoint is /api/v4/documents/{doc_id}/versions/{version_id}/pages/{page_id}/ocr/
+          const ocrUrl = `/api/v4/documents/${documentId}/versions/${version.id}/pages/${page.id}/ocr/`;
           const ocrData = await this.makeRequest('get', ocrUrl);
+          
+          // OCR returns content directly
           if (ocrData.content) {
             ocrTexts.push(ocrData.content);
           }
@@ -158,8 +142,8 @@ class MayanService {
       }
 
       if (ocrTexts.length === 0) {
-          // If we have pages but no text, it might be empty or processing
-          return 'OCR_PROCESSING';
+        // If we have pages but no text, it might be empty or processing
+        return 'OCR_PROCESSING';
       }
 
       return ocrTexts.join('\n\n');

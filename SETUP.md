@@ -5,8 +5,25 @@
 - **Docker Desktop** (Windows/Mac) or Docker Engine + Docker Compose (Linux)
 - **NVIDIA GPU** (optional) - For GPU-accelerated AI inference
 - **NVIDIA Container Toolkit** (if using GPU)
-- At least **8GB RAM** recommended
+- At least **12GB RAM** recommended (8GB minimum)
 - **15GB free disk space**
+
+## Windows WSL2 Configuration
+
+For optimal performance on Windows, create `C:\Users\<YourUsername>\.wslconfig`:
+
+```ini
+[wsl2]
+memory=12GB
+processors=6
+swap=4GB
+```
+
+Then restart WSL:
+```bash
+wsl --shutdown
+```
+And restart Docker Desktop.
 
 ## Installation
 
@@ -51,7 +68,7 @@ docker exec coffre-fort-ollama ollama pull llama3.2:1b
 | Backend | 5000 | 5000 |
 | Mayan EDMS | 8000 | 8000 |
 | Keycloak | 8081 | 8080 |
-| Ollama | 5001 | 11434 |
+| Ollama | 11434 | 11434 |
 
 ## GPU Configuration
 

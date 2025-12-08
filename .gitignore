@@ -46,6 +46,9 @@ debug_*.js
 test_*.py
 mayanknowledge.js
 
+# Personal notes (not for repo)
+FUTURE_IMPROVEMENTS.md
+
 # Python
 __pycache__/
 *.pyc

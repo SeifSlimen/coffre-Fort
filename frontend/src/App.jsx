@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { handleCallback, isAuthenticated, getUserInfo, logout } from './services/auth';
+import { handleCallback, isAuthenticated, getUserInfo, logout, getToken } from './services/auth';
+import { getUser } from './services/api';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import DocumentView from './components/DocumentView';
@@ -40,10 +41,28 @@ function App() {
         }
         setLoading(false);
       } else {
-        // No callback, just check if already authenticated
-        if (isAuthenticated()) {
-          setAuthenticated(true);
-          setUser(getUserInfo());
+        // No callback, validate existing token with backend
+        if (getToken()) {
+          try {
+            console.log('[App] Validating existing token with backend...');
+            const response = await getUser();
+            const userData = response.data;
+            
+            // Use the fresh user data from backend
+            setAuthenticated(true);
+            setUser({
+              id: userData.id,
+              email: userData.email,
+              username: userData.username,
+              roles: userData.roles
+            });
+            console.log('[App] Token validated, user:', userData.email);
+          } catch (error) {
+            console.error('[App] Token validation failed:', error);
+            // Token is invalid, clear auth state
+            setAuthenticated(false);
+            setUser(null);
+          }
         }
         setLoading(false);
       }

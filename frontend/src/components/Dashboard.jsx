@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDocuments, uploadDocument, deleteDocument, getUserInfo } from '../services/api';
+import { getDocuments, uploadDocument, deleteDocument, getUser } from '../services/api';
 import { getUserInfo as getAuthUserInfo } from '../services/auth';
 import '../App.css';
 
@@ -16,13 +16,29 @@ const Dashboard = () => {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [user, setUser] = useState(null);
+  const [canUpload, setCanUpload] = useState(false);
   
   const navigate = useNavigate();
   const isAdmin = user?.roles?.includes('admin') || false;
 
   useEffect(() => {
-    const authUser = getAuthUserInfo();
-    setUser(authUser);
+    const initUser = async () => {
+      const authUser = getAuthUserInfo();
+      setUser(authUser);
+      
+      // Get full user info from backend (includes granted permissions)
+      try {
+        const response = await getUser();
+        const userData = response.data;
+        setCanUpload(userData.canUpload || false);
+        console.log('[Dashboard] User canUpload:', userData.canUpload);
+      } catch (err) {
+        console.error('[Dashboard] Failed to get user permissions:', err);
+        setCanUpload(authUser?.roles?.includes('admin') || false);
+      }
+    };
+    
+    initUser();
     loadDocuments();
   }, [page]);
 
@@ -85,9 +101,11 @@ const Dashboard = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <h2>Documents</h2>
         <div style={{ display: 'flex', gap: '1rem' }}>
-          <button className="button button-primary" onClick={() => setShowUpload(!showUpload)}>
-            {showUpload ? 'Cancel' : 'Upload Document'}
-          </button>
+          {canUpload && (
+            <button className="button button-primary" onClick={() => setShowUpload(!showUpload)}>
+              {showUpload ? 'Cancel' : 'Upload Document'}
+            </button>
+          )}
           {isAdmin && (
             <button 
               className="button button-secondary" 
@@ -95,6 +113,17 @@ const Dashboard = () => {
             >
               Admin Panel
             </button>
+          )}
+          {isAdmin && (
+            <a 
+              href="http://localhost:8000/oidc/authenticate/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="button button-secondary"
+              style={{ textDecoration: 'none' }}
+            >
+              Open Mayan EDMS
+            </a>
           )}
         </div>
       </div>

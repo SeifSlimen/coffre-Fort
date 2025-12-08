@@ -2,101 +2,87 @@
 
 ## Pre-Demo Checklist
 
-- [ ] All services running (`docker-compose up`)
+- [ ] All services running (`docker-compose up -d`)
 - [ ] Keycloak realm configured with test users
-- [ ] Ollama model pulled (`docker exec coffre-fort-ollama ollama pull llama3.2:1b`)
-- [ ] Test PDF documents ready
+- [ ] Ollama model pulled (`docker exec coffre-fort-ollama ollama pull llama3.2:3b`)
+- [ ] Test PDF documents ready (preferably in French)
 - [ ] Browser cleared of old sessions
-- [ ] Screen recording software ready (optional)
+- [ ] Screen recording software ready
 
 ## Test Users
 
-- **Admin:** admin@test.com / admin123
-- **User:** user@test.com / user123
+| Email | Password | Role |
+|-------|----------|------|
+| admin@test.com | admin123 | Admin |
+| user@test.com | user123 | User |
 
-## 3-5 Minute Demo Script
+## 3-5 Minute Video Demo Script
 
-### Introduction (30 seconds)
+### 1. Installation Docker (30 secondes)
 
-"Today I'm presenting **Coffre-Fort Documentaire**, a secure document management system with AI-powered summarization. It's built using a microservices architecture with Docker Compose, featuring Keycloak for authentication, Mayan EDMS for document management, and Ollama for local AI processing."
+```bash
+# Show the single command deployment
+git clone https://github.com/SeifSlimen/coffre-Fort.git
+cd coffre-Fort
+docker-compose up -d
+```
 
-### Architecture Overview (1 minute)
+"Le projet se lance avec une seule commande. Docker Compose orchestre tous les services."
 
-1. **Show docker-compose.yml**
-   - "All services are containerized and orchestrated with Docker Compose"
-   - "We have 6 main services: Frontend, Backend, Keycloak, Mayan EDMS, Ollama, and Postgres"
+```bash
+# Show running containers
+docker ps
+```
 
-2. **Show running containers**
-   ```bash
-   docker ps
-   ```
-   - "All services are running and communicating via a Docker network"
+### 2. Démonstration Client / IA (2-3 minutes)
 
-### Authentication Demo (30 seconds)
+**Login Admin:**
+1. Ouvrir `http://localhost:3000`
+2. Connexion avec `admin@test.com` / `admin123`
+3. "L'authentification passe par Keycloak (SSO OIDC)"
 
-1. **Open browser to http://localhost:3000**
-   - "The frontend automatically redirects to Keycloak for authentication"
-   - Show Keycloak login page
+**Upload Document:**
+1. Cliquer "Upload Document" (visible uniquement pour Admin)
+2. Sélectionner un PDF français
+3. Ajouter titre et description
+4. "Le document est envoyé à Mayan EDMS pour OCR"
 
-2. **Login as admin@test.com**
-   - "I'm logging in as an administrator"
-   - Show dashboard with admin badge
+**Voir Résumé IA:**
+1. Cliquer "View" sur le document
+2. Attendre le chargement
+3. **Montrer le Résumé** - "L'IA locale (Ollama) génère un résumé en français"
+4. **Montrer les Mots-clés** - "Extraction automatique des mots-clés"
+5. "Tout le traitement est local - aucune donnée ne sort du serveur"
 
-3. **Mention roles**
-   - "The system supports role-based access control with admin and user roles"
+**Gestion des Accès Temporaires:**
+1. Aller dans "Admin Panel"
+2. Montrer la liste des utilisateurs
+3. Accorder un accès temporaire à un document
+4. "L'admin peut définir des fenêtres de temps pour l'accès"
 
-### Core Functionality (2 minutes)
+**Test Utilisateur Simple:**
+1. Se déconnecter
+2. Se connecter avec `user@test.com` / `user123`
+3. "L'utilisateur simple ne peut pas uploader"
+4. "Il peut seulement consulter les documents autorisés"
 
-1. **Upload Document**
-   - Click "Upload Document"
-   - Select a PDF file
-   - Add title and description
-   - Click Upload
-   - "The document is uploaded to Mayan EDMS, which processes OCR in the background"
+### 3. Architecture SSO (30 secondes)
 
-2. **View Document List**
-   - Show document in the list
-   - "Documents are displayed with metadata"
+1. Montrer le diagramme d'architecture
+2. "L'authentification passe par Keycloak (OIDC)"
+3. "Le backend valide les tokens JWT"
+4. "Le backend communique avec Mayan via un compte de service sécurisé"
+5. "Aucune donnée sensible n'est exposée au client"
 
-3. **View Document Details**
-   - Click "View" on a document
-   - **Highlight OCR Text:**
-     - "Mayan EDMS has extracted the text using OCR"
-   - **Highlight AI Summary:**
-     - "Our local AI service (Ollama) has generated a summary"
-   - **Highlight Keywords:**
-     - "And extracted key keywords automatically"
-   - "All processing happens locally - no external API calls"
+### 4. Conclusion (30 secondes)
 
-4. **Show Multiple Documents** (if time permits)
-   - Upload another document
-   - Show that summaries are cached for performance
-
-### Admin Features (30 seconds)
-
-1. **Navigate to Admin Panel**
-   - "As an administrator, I have access to the admin panel"
-   - Show user management
-   - Show access control features
-   - "Admins can grant time-limited access to documents"
-
-### Closing (30 seconds)
-
-1. **Key Highlights:**
-   - "One-command deployment with Docker Compose"
-   - "Local AI processing for privacy"
-   - "Secure authentication with Keycloak SSO"
-   - "OCR + AI integration for intelligent document management"
-   - "Microservices architecture for scalability"
-
-2. **Future Enhancements:**
-   - "Full SSO integration with Mayan"
-   - "Advanced search capabilities"
-   - "Document versioning and collaboration"
-
-3. **Q&A**
-
-## Demo Tips
+**Points Clés:**
+- ✅ Déploiement one-command avec Docker Compose
+- ✅ IA locale (privacy-first) avec résumés et mots-clés
+- ✅ Gestion des rôles (Admin / Utilisateur)
+- ✅ Accès temporaires (fenêtres de temps)
+- ✅ SSO OIDC avec Keycloak
+- ✅ Recherche OCR intégrée
 
 ### If Something Goes Wrong
 

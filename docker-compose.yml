@@ -2,15 +2,36 @@ version: "3.9"
 
 services:
   # ---------------------------
-  # 1) MAYAN DATABASE
+  # 1) MAYAN DATABASE (OPTIMIZED FOR PERFORMANCE)
   # ---------------------------
   postgres:
     image: postgres:15-alpine
     container_name: coffre-fort-postgres
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     environment:
       POSTGRES_DB: mayan
       POSTGRES_USER: mayan
       POSTGRES_PASSWORD: mayan_password
+      # PostgreSQL performance tuning
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c effective_cache_size=192MB
+      -c maintenance_work_mem=32MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=4MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=2MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c max_connections=100
+      -c logging_collector=off
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -22,26 +43,42 @@ services:
       retries: 5
 
   # ---------------------------
-  # 2) REDIS (REQUIRED FOR OCR)
+  # 2) REDIS (OPTIMIZED FOR PERFORMANCE)
   # ---------------------------
   redis:
     image: redis:7-alpine
     container_name: coffre-fort-redis
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    command: redis-server --maxmemory 200mb --maxmemory-policy allkeys-lru --save 900 1 300 10 60 10000 --appendonly yes --appendfsync everysec
     volumes:
       - redis_data:/data
     networks:
       - coffre-fort-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   # ---------------------------
-  # 3) MAYAN WEB SERVICE
+  # 3) MAYAN WEB SERVICE (optimized)
   # ---------------------------
   mayan:
     image: mayanedms/mayanedms
     container_name: coffre-fort-mayan
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+      keycloak:
         condition: service_started
     environment:
       MAYAN_DATABASE_ENGINE: django.db.backends.postgresql
@@ -53,65 +90,93 @@ services:
       MAYAN_CELERY_BROKER_URL: redis://redis:6379/0
       MAYAN_CELERY_RESULT_BACKEND: redis://redis:6379/0
       
+      # Performance optimizations
+      MAYAN_CELERY_WORKER_PREFETCH_MULTIPLIER: 2
+      MAYAN_CELERY_TASK_ALWAYS_EAGER: "false"
+      MAYAN_CELERY_TASK_EAGER_PROPAGATES: "true"
+      MAYAN_DATABASES_CONN_MAX_AGE: 300
+      
+      # Fixed admin credentials for API access
+      MAYAN_AUTOADMIN_USERNAME: admin
+      MAYAN_AUTOADMIN_PASSWORD: admin123
+      MAYAN_AUTOADMIN_EMAIL: admin@example.com
+      
       # Explicitly enable automatic OCR
       MAYAN_DOCUMENTS_OCR_AUTO_OCR: "true"
 
+      # SSO Configuration - Keycloak OIDC (RE-ENABLED)
+      # Fixed: No longer overriding AUTHENTICATION_BACKENDS to avoid maximum_session_length error
+      MAYAN_SETTINGS_MODULE: "mayan_custom.settings.user_settings"
+      OIDC_RP_CLIENT_ID: "mayan-edms"
+      OIDC_RP_CLIENT_SECRET: "mayan-edms-secret-key-2024"
+      OIDC_OP_AUTHORIZATION_ENDPOINT: "http://localhost:8081/realms/coffre-fort/protocol/openid-connect/auth"
+      OIDC_OP_TOKEN_ENDPOINT: "http://keycloak:8080/realms/coffre-fort/protocol/openid-connect/token"
+      OIDC_OP_USER_ENDPOINT: "http://keycloak:8080/realms/coffre-fort/protocol/openid-connect/userinfo"
+      OIDC_OP_JWKS_ENDPOINT: "http://keycloak:8080/realms/coffre-fort/protocol/openid-connect/certs"
+
     volumes:
       - mayan_media:/var/lib/mayan
+      # Mount custom settings for OIDC configuration
+      - ./docker/mayan/mayan_custom:/var/lib/mayan/mayan_custom:ro
     ports:
       - "8000:8000"
     networks:
       - coffre-fort-network
 
   # ---------------------------
-  # 4) MAYAN WORKERS
+  # 4) MAYAN WORKERS - DISABLED FOR DEV (saves ~3GB RAM)
+  # Mayan runs internal workers, separate workers are for high-volume production
+  # Uncomment for production deployment with more RAM
   # ---------------------------
-  worker-fast:
-    image: mayanedms/mayanedms:latest
-    container_name: coffre-fort-worker-fast
-    command: run_worker worker_c
-    environment:
-      MAYAN_DATABASE_ENGINE: django.db.backends.postgresql
-      MAYAN_DATABASE_NAME: mayan
-      MAYAN_DATABASE_USER: mayan
-      MAYAN_DATABASE_PASSWORD: mayan_password
-      MAYAN_DATABASE_HOST: postgres
-      MAYAN_CELERY_BROKER_URL: redis://redis:6379/0
-      MAYAN_CELERY_RESULT_BACKEND: redis://redis:6379/0
-      MAYAN_QUEUE_LIST: "converter,parsing,ocr,indexing,metadata,uploads,documents_file,documents_version"
-      MAYAN_WORKER_C_CONCURRENCY: 4
-      MAYAN_WORKER_LOG_LEVEL: INFO
-    depends_on:
-      - mayan
-      - redis
-      - postgres
-    volumes:
-      - mayan_media:/var/lib/mayan
-    networks:
-      - coffre-fort-network
+  # worker-fast:
+  #   image: mayanedms/mayanedms:latest
+  #   container_name: coffre-fort-worker-fast
+  #   command: run_worker worker_c
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 1536M
+  #   environment:
+  #     MAYAN_DATABASE_ENGINE: django.db.backends.postgresql
+  #     MAYAN_DATABASE_NAME: mayan
+  #     MAYAN_DATABASE_USER: mayan
+  #     MAYAN_DATABASE_PASSWORD: mayan_password
+  #     MAYAN_DATABASE_HOST: postgres
+  #     MAYAN_CELERY_BROKER_URL: redis://redis:6379/0
+  #     MAYAN_CELERY_RESULT_BACKEND: redis://redis:6379/0
+  #     MAYAN_QUEUE_LIST: "converter,parsing,ocr,indexing,metadata,uploads,documents_file,documents_version"
+  #     MAYAN_WORKER_C_CONCURRENCY: 2
+  #   depends_on:
+  #     - mayan
+  #   volumes:
+  #     - mayan_media:/var/lib/mayan
+  #   networks:
+  #     - coffre-fort-network
 
-  worker-slow:
-    image: mayanedms/mayanedms:latest
-    container_name: coffre-fort-worker-slow
-    command: run_worker worker_d
-    environment:
-      MAYAN_DATABASE_ENGINE: django.db.backends.postgresql
-      MAYAN_DATABASE_NAME: mayan
-      MAYAN_DATABASE_USER: mayan
-      MAYAN_DATABASE_PASSWORD: mayan_password
-      MAYAN_DATABASE_HOST: postgres
-      MAYAN_CELERY_BROKER_URL: redis://redis:6379/0
-      MAYAN_CELERY_RESULT_BACKEND: redis://redis:6379/0
-      MAYAN_QUEUE_LIST: "checkouts_periodic,documents_downloads,documents_exports,documents_periodic,documents_trash,duplicates,duplicates_slow,events,events_slow,file_caching,file_caching_slow,indexing_slow,mailing,signatures,signatures_slow,sources,sources_periodic,statistics,storage,storage_periodic,tools,workflows,workflows_slow"
-      MAYAN_WORKER_D_CONCURRENCY: 2
-    depends_on:
-      - mayan
-      - redis
-      - postgres
-    volumes:
-      - mayan_media:/var/lib/mayan
-    networks:
-      - coffre-fort-network
+  # worker-slow:
+  #   image: mayanedms/mayanedms:latest
+  #   container_name: coffre-fort-worker-slow
+  #   command: run_worker worker_d
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 1536M
+  #   environment:
+  #     MAYAN_DATABASE_ENGINE: django.db.backends.postgresql
+  #     MAYAN_DATABASE_NAME: mayan
+  #     MAYAN_DATABASE_USER: mayan
+  #     MAYAN_DATABASE_PASSWORD: mayan_password
+  #     MAYAN_DATABASE_HOST: postgres
+  #     MAYAN_CELERY_BROKER_URL: redis://redis:6379/0
+  #     MAYAN_CELERY_RESULT_BACKEND: redis://redis:6379/0
+  #     MAYAN_QUEUE_LIST: "checkouts_periodic,documents_downloads,documents_exports"
+  #     MAYAN_WORKER_D_CONCURRENCY: 1
+  #   depends_on:
+  #     - mayan
+  #   volumes:
+  #     - mayan_media:/var/lib/mayan
+  #   networks:
+  #     - coffre-fort-network
 
   # ---------------------------
   # 5) KEYCLOAK DATABASE
@@ -129,15 +194,20 @@ services:
       - coffre-fort-network
 
   # ---------------------------
-  # 6) KEYCLOAK
+  # 6) KEYCLOAK (optimized)
   # ---------------------------
   keycloak:
     image: quay.io/keycloak/keycloak:latest
     container_name: coffre-fort-keycloak
     command: start-dev --import-realm
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
+      JAVA_OPTS_APPEND: "-Xms256m -Xmx384m"
 
       KC_DB: postgres
       KC_DB_URL_HOST: keycloak-db
@@ -165,14 +235,19 @@ services:
     image: ollama/ollama:latest
     container_name: coffre-fort-ollama
     ports:
-      - "5001:11434"
+      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     networks:
       - coffre-fort-network
-    # GPU support - requires NVIDIA Container Toolkit
-    # Uncomment the following if you have issues:
-    runtime: nvidia
+    # GPU support for Windows Docker Desktop with WSL2
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
 
@@ -189,7 +264,7 @@ services:
 
       MAYAN_URL: http://mayan:8000
       MAYAN_USERNAME: admin
-      MAYAN_PASSWORD: eGnMEAatPd
+      MAYAN_PASSWORD: admin123
 
       OLLAMA_URL: http://ollama:11434
       OLLAMA_MODEL: llama3.2:3b
@@ -201,7 +276,11 @@ services:
       # NOTE: The backend currently uses public client access or bearer token validation
       # which doesn't strictly require a secret if configured as public/bearer-only.
       # However, if you change it to confidential, you MUST put the secret here.
-      KEYCLOAK_CLIENT_SECRET: "" 
+      KEYCLOAK_CLIENT_SECRET: ""
+
+      # Keycloak Admin API credentials (for user management)
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
 
     ports:
       - "5000:5000"

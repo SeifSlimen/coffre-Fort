@@ -9,19 +9,21 @@ A containerized microservices document management system with AI-powered summari
 | **Frontend** | React 18 | 3000 | Web client with Keycloak SSO |
 | **Backend** | Express/Node.js | 5000 | API gateway with JWT validation |
 | **Mayan EDMS** | Python/Django | 8000 | Document management & OCR |
-| **Ollama** | Go/LLM | 5001 | AI summarization (GPU accelerated) |
+| **Ollama** | Go/LLM | 11434 | AI summarization (GPU accelerated) |
 | **Keycloak** | Java | 8081 | Identity provider (SSO) |
-| **PostgreSQL** | Database | 5432 | Data storage |
-| **Redis** | Cache | 6379 | Task queue for OCR workers |
+| **PostgreSQL** | Database | 5432 | Optimized data storage |
+| **Redis** | Cache | 6379 | Task queue with LRU eviction |
 
 ## ✨ Features
 
 - **📄 Document Management** - Upload, view, and organize documents
 - **🔍 OCR Processing** - Automatic text extraction from PDFs/images
-- **🤖 AI Summarization** - French summaries with keywords (mots-clés)
-- **🔐 SSO Authentication** - Keycloak-based single sign-on
-- **👥 Role-Based Access** - Admin and user roles
+- **🤖 AI Summarization** - French summaries with keywords (mots-clés) powered by Ollama
+- **🔐 SSO Authentication** - Keycloak OIDC-based single sign-on
+- **👥 Granular Access Control** - View, Download, OCR, AI, Upload permissions per user
+- **⏰ Time-Limited Access** - Admins can grant temporary document access with expiry
 - **🎮 GPU Acceleration** - NVIDIA GPU support for fast AI inference
+- **⚡ Performance Optimized** - Redis caching, PostgreSQL tuning, memory limits
 
 ## 🚀 Quick Start
 
@@ -29,8 +31,21 @@ A containerized microservices document management system with AI-powered summari
 
 - Docker Desktop with WSL2 (Windows) or Docker Engine (Linux)
 - NVIDIA GPU + NVIDIA Container Toolkit (optional, for GPU acceleration)
-- 8GB RAM minimum
+- 12GB RAM recommended (8GB minimum)
 - 15GB free disk space
+
+### Windows WSL2 Memory Configuration
+
+For optimal performance on Windows, create `C:\Users\<YourUsername>\.wslconfig`:
+
+```ini
+[wsl2]
+memory=12GB
+processors=6
+swap=4GB
+```
+
+Then restart WSL: `wsl --shutdown` and restart Docker Desktop.
 
 ### Start the Application
 
@@ -64,6 +79,69 @@ docker exec coffre-fort-ollama ollama pull llama3.2:3b
 - [docs/API.md](docs/API.md) - API documentation
 - [docs/TESTING.md](docs/TESTING.md) - Testing guide
 - [docs/DEMO.md](docs/DEMO.md) - Demo script
+
+## 👥 Access Control & Permissions
+
+### Roles
+
+| Role | Permissions |
+|------|-------------|
+| **Admin** | Full access: upload, view all documents, manage users, grant/revoke permissions |
+| **User** | View authorized documents only, based on granted permissions |
+
+### Granular Permissions
+
+Admins can grant specific permissions per document per user:
+
+| Permission | Description |
+|------------|-------------|
+| **View** | See the document in the list and open it |
+| **Download** | Download the original file |
+| **OCR** | View extracted text from document |
+| **AI Summary** | Access AI-generated summary and keywords |
+| **Upload** | Allow user to upload new documents |
+
+### Time-Limited Access (Fenêtres de Temps)
+
+Admins can grant temporary access to specific documents:
+
+1. Login as Admin → Go to **Admin Panel**
+2. Select a user and document
+3. Choose permissions (view, download, OCR, AI)
+4. Set expiration date/time
+5. User can access the document until expiration
+
+Access is automatically revoked after the expiration time.
+
+### Test Accounts
+
+| Email | Password | Role |
+|-------|----------|------|
+| admin@test.com | admin123 | Admin |
+| user@test.com | user123 | User |
+
+## 🔗 SSO Architecture (Bonus)
+
+The system implements OIDC-based Single Sign-On with Keycloak:
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Frontend      │────▶│    Keycloak     │◀────│   Mayan EDMS    │
+│  (React App)    │     │  (OIDC Provider)│     │  (OIDC Client)  │
+└────────┬────────┘     └─────────────────┘     └─────────────────┘
+         │                       │
+         ▼                       │
+┌─────────────────┐              │
+│    Backend      │──────────────┘
+│   (Node.js)     │   JWT Validation
+└─────────────────┘
+```
+
+**SSO Flow:**
+1. User logs in via Frontend → Keycloak
+2. Frontend receives JWT token
+3. Backend validates JWT for API calls
+4. User clicks "Open in Mayan" → Seamless SSO redirect (same Keycloak session)
 
 ## 🛠️ Development
 

@@ -1,5 +1,18 @@
 # Quick Start Guide
 
+## Prerequisites (Windows)
+
+Create `C:\Users\<YourUsername>\.wslconfig` for optimal memory:
+
+```ini
+[wsl2]
+memory=12GB
+processors=6
+swap=4GB
+```
+
+Then run `wsl --shutdown` and restart Docker Desktop.
+
 ## One-Command Setup
 
 ```bash

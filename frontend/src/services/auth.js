@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID } from '../utils/constants';
+import { KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, API_URL } from '../utils/constants';
 
 // Configuration
 const config = {
@@ -31,6 +31,43 @@ let tokens = {
 let userInfo = null;
 
 /**
+ * Direct login - authenticate with username/password without redirect
+ */
+export const directLogin = async (username, password) => {
+  try {
+    console.log('[Auth] Direct login attempt for:', username);
+    
+    const response = await axios.post(`${API_URL}/api/auth/direct-login`, {
+      username,
+      password
+    });
+
+    const data = response.data;
+
+    // Store tokens
+    tokens.accessToken = data.access_token;
+    tokens.refreshToken = data.refresh_token;
+    tokens.idToken = data.id_token;
+    tokens.expiresAt = Date.now() + (data.expires_in * 1000);
+
+    // Persist to localStorage
+    localStorage.setItem('auth_tokens', JSON.stringify(tokens));
+
+    console.log('[Auth] Direct login successful');
+
+    // Decode ID token to get user info
+    if (data.id_token) {
+      userInfo = parseJwt(data.id_token);
+    }
+
+    return true;
+  } catch (error) {
+    console.error('[Auth] Direct login failed:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Authentication failed');
+  }
+};
+
+/**
  * Generate a random state parameter for CSRF protection
  */
 const generateState = () => {
@@ -38,7 +75,7 @@ const generateState = () => {
 };
 
 /**
- * Initiate login by redirecting to Keycloak
+ * Initiate login by redirecting to Keycloak (fallback/SSO option)
  */
 export const login = () => {
   const state = generateState();
@@ -146,7 +183,7 @@ export const getToken = () => {
 };
 
 /**
- * Get user information from ID token
+ * Get user information from ID token and access token
  */
 export const getUserInfo = () => {
   if (!userInfo && tokens.idToken) {
@@ -155,6 +192,13 @@ export const getUserInfo = () => {
 
   if (!userInfo) return null;
 
+  // Get roles from access token (realm_access is in access token, not ID token)
+  let roles = userInfo.realm_access?.roles || [];
+  if (roles.length === 0 && tokens.accessToken) {
+    const accessTokenPayload = parseJwt(tokens.accessToken);
+    roles = accessTokenPayload?.realm_access?.roles || [];
+  }
+
   return {
     sub: userInfo.sub,
     email: userInfo.email,
@@ -162,12 +206,12 @@ export const getUserInfo = () => {
     name: userInfo.name,
     givenName: userInfo.given_name,
     familyName: userInfo.family_name,
-    roles: userInfo.realm_access?.roles || []
+    roles: roles
   };
 };
 
 /**
- * Refresh access token using refresh token
+ * Refresh access token using refresh token via backend
  */
 export const refreshToken = async () => {
   if (!tokens.refreshToken) {
@@ -175,21 +219,12 @@ export const refreshToken = async () => {
   }
 
   try {
-    const tokenUrl = `${config.url}/realms/${config.realm}/protocol/openid-connect/token`;
-
-    const response = await axios.post(
-      tokenUrl,
-      new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: tokens.refreshToken,
-        client_id: config.clientId
-      }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
-      }
-    );
+    console.log('[Auth] Refreshing token via backend...');
+    
+    // Use backend endpoint for refresh (more reliable, handles CORS)
+    const response = await axios.post(`${API_URL}/api/auth/refresh`, {
+      refresh_token: tokens.refreshToken
+    });
 
     const data = response.data;
 
@@ -202,11 +237,11 @@ export const refreshToken = async () => {
     // Persist to localStorage
     localStorage.setItem('auth_tokens', JSON.stringify(tokens));
 
-    console.log('Token refreshed successfully');
+    console.log('[Auth] Token refreshed successfully, expires in:', data.expires_in, 'seconds');
 
     return tokens.accessToken;
   } catch (error) {
-    console.error('Token refresh failed:', error.response?.data || error.message);
+    console.error('[Auth] Token refresh failed:', error.response?.data || error.message);
     // Clear tokens on refresh failure
     clearTokens();
     throw error;
@@ -214,34 +249,65 @@ export const refreshToken = async () => {
 };
 
 /**
- * Update token if it's about to expire
+ * Update token if it's about to expire or already expired
  */
 export const updateToken = async (minValidity = 60) => {
+  // If no access token, can't update
+  if (!tokens.accessToken) {
+    return null;
+  }
+
+  // If no expiry info, just return current token
   if (!tokens.expiresAt) {
     return tokens.accessToken;
   }
 
   const expiresIn = (tokens.expiresAt - Date.now()) / 1000;
+  console.log('[Auth] Token expires in:', expiresIn, 'seconds');
 
+  // If token is expired or about to expire, try to refresh
   if (expiresIn < minValidity) {
-    return await refreshToken();
+    console.log('[Auth] Token needs refresh');
+    if (tokens.refreshToken) {
+      return await refreshToken();
+    } else {
+      console.log('[Auth] No refresh token available');
+      return tokens.accessToken; // Return expired token, let server reject
+    }
   }
 
   return tokens.accessToken;
 };
 
 /**
- * Logout user
+ * Logout user - silent logout without redirect to Keycloak
  */
-export const logout = () => {
-  const logoutUrl = `${config.url}/realms/${config.realm}/protocol/openid-connect/logout?` +
-    `redirect_uri=${encodeURIComponent(config.redirectUri)}`;
-
-  // Clear tokens
+export const logout = async () => {
+  const refreshToken = tokens.refreshToken;
+  
+  // Clear tokens first
   clearTokens();
 
-  // Redirect to Keycloak logout
-  window.location.href = logoutUrl;
+  // Try to revoke the token with our backend (which will call Keycloak)
+  if (refreshToken) {
+    try {
+      await axios.post(`${API_URL}/api/auth/logout`, 
+        { refresh_token: refreshToken },
+        {
+          headers: {
+            'Authorization': `Bearer ${tokens.accessToken || ''}`
+          }
+        }
+      );
+      console.log('[Auth] Logout successful - token revoked');
+    } catch (error) {
+      console.warn('[Auth] Token revocation failed, but local logout completed:', error.message);
+      // Continue anyway - local tokens are cleared
+    }
+  }
+
+  // Redirect to login page
+  window.location.href = '/';
 };
 
 /**
@@ -292,6 +358,7 @@ if (typeof window !== 'undefined') {
 
 export default {
   login,
+  directLogin,
   logout,
   handleCallback,
   isAuthenticated,

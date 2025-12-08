@@ -1,6 +1,6 @@
 const MAYAN_URL = process.env.MAYAN_URL || 'http://localhost:8000';
 const MAYAN_USERNAME = process.env.MAYAN_USERNAME || 'admin';
-const MAYAN_PASSWORD = process.env.MAYAN_PASSWORD || 'eGnMEAatPd';
+const MAYAN_PASSWORD = process.env.MAYAN_PASSWORD || 'admin123';
 
 const axios = require('axios');
 
