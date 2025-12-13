@@ -1,12 +1,71 @@
 const axios = require('axios');
+const cacheService = require('./cacheService');
+const { cacheKeys, CACHE_TTL } = cacheService;
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:1b';
 
-// In-memory cache for AI responses
-const aiCache = new Map();
-
 class AIService {
+  constructor() {
+    this._modelReady = null;
+    this._lastModelCheckAt = 0;
+    this._modelCheckInFlight = null;
+  }
+
+  async ensureModelReady() {
+    const now = Date.now();
+    const cacheMs = 60_000;
+
+    if (this._modelReady === true && now - this._lastModelCheckAt < cacheMs) {
+      return true;
+    }
+
+    if (this._modelCheckInFlight) {
+      return this._modelCheckInFlight;
+    }
+
+    this._modelCheckInFlight = (async () => {
+      this._lastModelCheckAt = now;
+
+      const available = await this.checkModelAvailable();
+      if (!available) {
+        console.warn(`[AI] Model '${OLLAMA_MODEL}' not available, attempting pull...`);
+        const pulled = await this.pullModel();
+        if (!pulled) {
+          this._modelReady = false;
+          return false;
+        }
+        const availableAfterPull = await this.checkModelAvailable();
+        if (!availableAfterPull) {
+          this._modelReady = false;
+          return false;
+        }
+      }
+
+      // Warm up the model with a tiny prompt to ensure it's loaded into memory
+      try {
+        console.log('[AI] Warming up model...');
+        await axios.post(
+          `${OLLAMA_URL}/api/generate`,
+          { model: OLLAMA_MODEL, prompt: 'Hi', stream: false, options: { num_predict: 1 } },
+          { timeout: 60000 }
+        );
+        console.log('[AI] Model warmed up successfully');
+      } catch (warmupErr) {
+        console.warn('[AI] Warmup failed (non-fatal):', warmupErr.message);
+      }
+
+      this._modelReady = true;
+      return true;
+    })();
+
+    try {
+      return await this._modelCheckInFlight;
+    } finally {
+      this._modelCheckInFlight = null;
+    }
+  }
+
   async checkModelAvailable() {
     try {
       const response = await axios.get(`${OLLAMA_URL}/api/tags`, { timeout: 5000 });
@@ -30,27 +89,71 @@ class AIService {
     }
   }
 
-  async generateSummary(text) {
-    if (!text || text.trim().length === 0) {
+  isValidSummaryPayload(payload) {
+    return (
+      payload &&
+      typeof payload === 'object' &&
+      typeof payload.summary === 'string' &&
+      Array.isArray(payload.keywords)
+    );
+  }
+
+  normalizeTextInput(text) {
+    if (typeof text === 'string') return text;
+    if (text === null || text === undefined) return '';
+
+    // Defensive: some callers might accidentally pass non-string data.
+    try {
+      return JSON.stringify(text);
+    } catch (_) {
+      return String(text);
+    }
+  }
+
+  async generateSummary(text, forceRefresh = false, documentId = null) {
+    const normalizedText = this.normalizeTextInput(text);
+
+    if (!normalizedText || normalizedText.trim().length === 0) {
       return {
         summary: 'Aucun contenu textuel disponible pour le résumé.',
         keywords: []
       };
     }
 
-    // Check cache
-    const cacheKey = `summary_${this.hashText(text.substring(0, 500))}`;
-    if (aiCache.has(cacheKey)) {
-      return aiCache.get(cacheKey);
+    // Check Redis cache - use documentId for better key uniqueness
+    const textHash = this.hashText(normalizedText.substring(0, 500));
+    const docIdStr = documentId ? String(documentId) : 'unknown';
+    const cacheKey = cacheKeys.aiSummary(docIdStr, textHash);
+    if (!forceRefresh) {
+      const cached = await cacheService.get(cacheKey);
+      if (cached) {
+        if (this.isValidSummaryPayload(cached)) {
+          console.log(`[AI] Cache HIT for summary (doc: ${docIdStr}, hash: ${textHash})`);
+          return cached;
+        }
+
+        console.warn(`[AI] Cache HIT but invalid payload shape; evicting key: ${cacheKey}`);
+        await cacheService.del(cacheKey);
+      }
     }
 
+    console.log(`[AI] Cache MISS for summary (doc: ${docIdStr}, hash: ${textHash}), generating...`);
+
     try {
+      const modelReady = await this.ensureModelReady();
+      if (!modelReady) {
+        return {
+          summary: `Le modèle IA '${OLLAMA_MODEL}' n'est pas disponible. Veuillez le télécharger (ex: 'ollama pull ${OLLAMA_MODEL}') puis réessayer.`,
+          keywords: []
+        };
+      }
+
       const prompt = `Tu es un assistant spécialisé dans l'analyse de documents. Analyse le document suivant et fournis un résumé et des mots-clés.
 
 IMPORTANT: Ne pas utiliser de formatage markdown (pas de ** ou #). Répondre en texte simple.
 
 Document à analyser:
-${text.substring(0, 4000)}
+${normalizedText.substring(0, 4000)}
 
 Réponds dans ce format exact (texte simple, pas de markdown):
 Résumé: [Écris ici un résumé concis de 3-4 phrases décrivant le contenu principal]
@@ -68,17 +171,29 @@ Mots-clés: [mot1, mot2, mot3, mot4, mot5]`;
             num_predict: 500
           }
         },
-        { timeout: 120000 } // 120 seconds timeout for slower models
+        { timeout: 180000 } // 180 seconds timeout for cold start + generation
       );
 
       const result = this.parseAIResponse(response.data.response || '');
       
-      // Cache the result
-      aiCache.set(cacheKey, result);
+      // Cache the result in Redis (24 hour TTL)
+      await cacheService.set(cacheKey, result, CACHE_TTL.AI_SUMMARY);
+      console.log(`[AI] Cached summary for doc: ${docIdStr}, hash: ${textHash}`);
       
       return result;
     } catch (error) {
-      console.error('AI service error:', error.message);
+      const errorText = error?.response?.data?.error || error?.response?.data?.detail || error.message;
+      console.error('AI service error:', errorText);
+
+      // If Ollama reports missing model, mark as not-ready and return a helpful message.
+      if (typeof errorText === 'string' && /model|not\s+found/i.test(errorText)) {
+        this._modelReady = false;
+        return {
+          summary: `Le modèle IA '${OLLAMA_MODEL}' est introuvable côté Ollama. Télécharge-le (ex: 'ollama pull ${OLLAMA_MODEL}') puis réessaye.`,
+          keywords: []
+        };
+      }
+
       if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
         return {
           summary: 'Le service IA est temporairement indisponible. Veuillez réessayer plus tard.',
@@ -163,8 +278,10 @@ Mots-clés: [mot1, mot2, mot3, mot4, mot5]`;
     return hash.toString();
   }
 
-  clearCache() {
-    aiCache.clear();
+  async clearCache() {
+    // Clear all AI summary caches
+    await cacheService.invalidatePattern('cache:ai:*');
+    console.log('[AI] Cache cleared');
   }
 }
 

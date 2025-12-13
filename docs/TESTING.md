@@ -4,7 +4,7 @@
 
 ### Prerequisites
 - All services running: `docker-compose up -d`
-- Ollama model pulled: `docker exec coffre-fort-ollama ollama pull llama3.2:1b`
+- Ollama model pulled: `docker exec coffre-fort-ollama ollama pull llama3.2:3b`
 - Keycloak realm configured with test users
 
 ### 1. Service Health Checks
@@ -198,11 +198,9 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:5000/api/documents/1
 
 ### Backend Unit Tests
 
-Create `backend/tests/` directory with:
-- JWT validation tests
-- Document service tests
-- AI service tests
-- Access control tests
+Smoke tests live in `backend/tests/` and are designed to be run locally against the Docker stack.
+
+For deeper automated coverage, you can later add unit tests here (JWT validation, document service, AI service, access control).
 
 ### Integration Tests
 

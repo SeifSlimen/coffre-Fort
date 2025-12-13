@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ---------------------------
   # 1) MAYAN DATABASE (OPTIMIZED FOR PERFORMANCE)
@@ -18,26 +16,13 @@ services:
       # PostgreSQL performance tuning
       POSTGRES_INITDB_ARGS: "--data-checksums"
     command: >
-      postgres
-      -c shared_buffers=128MB
-      -c effective_cache_size=192MB
-      -c maintenance_work_mem=32MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=4MB
-      -c default_statistics_target=100
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c work_mem=2MB
-      -c min_wal_size=1GB
-      -c max_wal_size=4GB
-      -c max_connections=100
-      -c logging_collector=off
+      postgres -c shared_buffers=128MB -c effective_cache_size=192MB -c maintenance_work_mem=32MB -c checkpoint_completion_target=0.9 -c wal_buffers=4MB -c default_statistics_target=100 -c random_page_cost=1.1 -c effective_io_concurrency=200 -c work_mem=2MB -c min_wal_size=1GB -c max_wal_size=4GB -c max_connections=100 -c logging_collector=off
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - coffre-fort-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mayan"]
+      test: [ "CMD-SHELL", "pg_isready -U mayan" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -58,13 +43,14 @@ services:
     networks:
       - coffre-fort-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 3s
       retries: 3
 
   # ---------------------------
-  # 3) MAYAN WEB SERVICE (optimized)
+  # 3) MAYAN WEB SERVICE (optimized for development)
+  # Uses internal workers - no separate worker containers needed
   # ---------------------------
   mayan:
     image: mayanedms/mayanedms
@@ -72,7 +58,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 2G  # Stable: concurrency=1 per worker = ~1.5GB usage
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,37 +72,67 @@ services:
       MAYAN_DATABASE_USER: mayan
       MAYAN_DATABASE_PASSWORD: mayan_password
       MAYAN_DATABASE_HOST: postgres
+      # Enable internal workers (no separate worker containers needed)
+      MAYAN_WORKER_ENABLE: "True"
 
       MAYAN_CELERY_BROKER_URL: redis://redis:6379/0
       MAYAN_CELERY_RESULT_BACKEND: redis://redis:6379/0
-      
+
+      # ============================================================
+      # WORKER CONCURRENCY SETTINGS
+      # ============================================================
+      # STABLE/DEV: concurrency=1 per worker = ~5 processes = ~1.5GB RAM
+      # PRODUCTION: concurrency=4 per worker = ~20 processes = ~5GB RAM (set mem_limit: 6G)
+      # ============================================================
+      MAYAN_WORKER_A_CONCURRENCY: 1  # converter, events_fast
+      MAYAN_WORKER_B_CONCURRENCY: 1  # documents, indexing, parsing
+      MAYAN_WORKER_C_CONCURRENCY: 1  # periodic tasks, exports
+      MAYAN_WORKER_D_CONCURRENCY: 1  # OCR, file_metadata
+      MAYAN_WORKER_E_CONCURRENCY: 1  # search
+      MAYAN_GUNICORN_WORKERS: 2      # web server workers
+      # --- PRODUCTION: Uncomment below, comment above, set mem_limit: 6G ---
+      # MAYAN_WORKER_A_CONCURRENCY: 4
+      # MAYAN_WORKER_B_CONCURRENCY: 4
+      # MAYAN_WORKER_C_CONCURRENCY: 4
+      # MAYAN_WORKER_D_CONCURRENCY: 4
+      # MAYAN_WORKER_E_CONCURRENCY: 4
+      # MAYAN_GUNICORN_WORKERS: 3
+
       # Performance optimizations
       MAYAN_CELERY_WORKER_PREFETCH_MULTIPLIER: 2
       MAYAN_CELERY_TASK_ALWAYS_EAGER: "false"
       MAYAN_CELERY_TASK_EAGER_PROPAGATES: "true"
       MAYAN_DATABASES_CONN_MAX_AGE: 300
-      
+
       # Fixed admin credentials for API access
       MAYAN_AUTOADMIN_USERNAME: admin
       MAYAN_AUTOADMIN_PASSWORD: admin123
       MAYAN_AUTOADMIN_EMAIL: admin@example.com
-      
+
       # Explicitly enable automatic OCR
       MAYAN_DOCUMENTS_OCR_AUTO_OCR: "true"
+
+      # Disable GPG/Signatures apps (fixes BrokenPipeError with PNG files)
+      MAYAN_COMMON_DISABLED_APPS: "mayan.apps.django_gpg,mayan.apps.document_signatures,mayan.apps.signature_captures"
 
       # SSO Configuration - Keycloak OIDC (RE-ENABLED)
       # Fixed: No longer overriding AUTHENTICATION_BACKENDS to avoid maximum_session_length error
       MAYAN_SETTINGS_MODULE: "mayan_custom.settings.user_settings"
       OIDC_RP_CLIENT_ID: "mayan-edms"
       OIDC_RP_CLIENT_SECRET: "mayan-edms-secret-key-2024"
-      OIDC_OP_AUTHORIZATION_ENDPOINT: "http://localhost:8081/realms/coffre-fort/protocol/openid-connect/auth"
-      OIDC_OP_TOKEN_ENDPOINT: "http://keycloak:8080/realms/coffre-fort/protocol/openid-connect/token"
-      OIDC_OP_USER_ENDPOINT: "http://keycloak:8080/realms/coffre-fort/protocol/openid-connect/userinfo"
-      OIDC_OP_JWKS_ENDPOINT: "http://keycloak:8080/realms/coffre-fort/protocol/openid-connect/certs"
+      # IMPORTANT: Authorization endpoint must be browser-accessible.
+      # Override in production with an env var (e.g. https://keycloak.yourdomain.com/...)
+      OIDC_OP_AUTHORIZATION_ENDPOINT: ${OIDC_OP_AUTHORIZATION_ENDPOINT:-http://localhost:8081/realms/coffre-fort/protocol/openid-connect/auth}
+      # Backchannel endpoints MUST use a base URL consistent with the issuer the browser uses.
+      # On Docker Desktop (Windows/Mac), `host.docker.internal` reaches the host-published port.
+      # This prevents Keycloak `/userinfo` from rejecting tokens due to base URL/issuer mismatch.
+      OIDC_OP_TOKEN_ENDPOINT: ${OIDC_OP_TOKEN_ENDPOINT:-http://host.docker.internal:8081/realms/coffre-fort/protocol/openid-connect/token}
+      OIDC_OP_USER_ENDPOINT: ${OIDC_OP_USER_ENDPOINT:-http://host.docker.internal:8081/realms/coffre-fort/protocol/openid-connect/userinfo}
+      OIDC_OP_JWKS_ENDPOINT: ${OIDC_OP_JWKS_ENDPOINT:-http://host.docker.internal:8081/realms/coffre-fort/protocol/openid-connect/certs}
 
     volumes:
       - mayan_media:/var/lib/mayan
-      # Mount custom settings for OIDC configuration
+      # Mount custom settings for OIDC configuration (now also includes GPG disable)
       - ./docker/mayan/mayan_custom:/var/lib/mayan/mayan_custom:ro
     ports:
       - "8000:8000"
@@ -124,9 +140,14 @@ services:
       - coffre-fort-network
 
   # ---------------------------
-  # 4) MAYAN WORKERS - DISABLED FOR DEV (saves ~3GB RAM)
-  # Mayan runs internal workers, separate workers are for high-volume production
-  # Uncomment for production deployment with more RAM
+  # 4) MAYAN WORKERS - FOR PRODUCTION DEPLOYMENT
+  # For high-volume deployments, uncomment these workers
+  # They provide dedicated queue processing for better throughput
+  # 
+  # TO ENABLE: 
+  # 1. Uncomment worker-fast and worker-slow below
+  # 2. Set MAYAN_WORKER_ENABLE: "False" in mayan service above
+  # 3. Increase mayan memory limit to 1G (just web server)
   # ---------------------------
   # worker-fast:
   #   image: mayanedms/mayanedms:latest
@@ -135,7 +156,7 @@ services:
   #   deploy:
   #     resources:
   #       limits:
-  #         memory: 1536M
+  #         memory: 1G  # Reduced: concurrency=1
   #   environment:
   #     MAYAN_DATABASE_ENGINE: django.db.backends.postgresql
   #     MAYAN_DATABASE_NAME: mayan
@@ -144,12 +165,16 @@ services:
   #     MAYAN_DATABASE_HOST: postgres
   #     MAYAN_CELERY_BROKER_URL: redis://redis:6379/0
   #     MAYAN_CELERY_RESULT_BACKEND: redis://redis:6379/0
+  #     MAYAN_CELERY_WORKER_PREFETCH_MULTIPLIER: 1
   #     MAYAN_QUEUE_LIST: "converter,parsing,ocr,indexing,metadata,uploads,documents_file,documents_version"
-  #     MAYAN_WORKER_C_CONCURRENCY: 2
+  #     MAYAN_SETTINGS_MODULE: "mayan_custom.settings.user_settings"
+  #     MAYAN_COMMON_DISABLED_APPS: "mayan.apps.django_gpg,mayan.apps.document_signatures,mayan.apps.signature_captures"
+  #     MAYAN_WORKER_C_CONCURRENCY: 1  # KEY: Set to 1 for memory efficiency
   #   depends_on:
   #     - mayan
   #   volumes:
   #     - mayan_media:/var/lib/mayan
+  #     - ./docker/mayan/mayan_custom:/var/lib/mayan/mayan_custom:ro
   #   networks:
   #     - coffre-fort-network
 
@@ -160,7 +185,7 @@ services:
   #   deploy:
   #     resources:
   #       limits:
-  #         memory: 1536M
+  #         memory: 1G  # Reduced: concurrency=1
   #   environment:
   #     MAYAN_DATABASE_ENGINE: django.db.backends.postgresql
   #     MAYAN_DATABASE_NAME: mayan
@@ -169,12 +194,16 @@ services:
   #     MAYAN_DATABASE_HOST: postgres
   #     MAYAN_CELERY_BROKER_URL: redis://redis:6379/0
   #     MAYAN_CELERY_RESULT_BACKEND: redis://redis:6379/0
+  #     MAYAN_CELERY_WORKER_PREFETCH_MULTIPLIER: 1
   #     MAYAN_QUEUE_LIST: "checkouts_periodic,documents_downloads,documents_exports"
-  #     MAYAN_WORKER_D_CONCURRENCY: 1
+  #     MAYAN_SETTINGS_MODULE: "mayan_custom.settings.user_settings"
+  #     MAYAN_COMMON_DISABLED_APPS: "mayan.apps.django_gpg,mayan.apps.document_signatures,mayan.apps.signature_captures"
+  #     MAYAN_WORKER_D_CONCURRENCY: 1  # KEY: Set to 1 for memory efficiency
   #   depends_on:
   #     - mayan
   #   volumes:
   #     - mayan_media:/var/lib/mayan
+  #     - ./docker/mayan/mayan_custom:/var/lib/mayan/mayan_custom:ro
   #   networks:
   #     - coffre-fort-network
 
@@ -200,6 +229,7 @@ services:
     image: quay.io/keycloak/keycloak:latest
     container_name: coffre-fort-keycloak
     command: start-dev --import-realm
+    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -207,7 +237,14 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
-      JAVA_OPTS_APPEND: "-Xms256m -Xmx384m"
+      # Keep Keycloak small for dev on Docker Desktop (avoid exit 137 / OOM kills)
+      JAVA_OPTS_APPEND: "-Xms128m -Xmx256m"
+
+      # Dev HTTP setup (avoid Secure cookies on plain HTTP which breaks login POST)
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_URL: "http://localhost:8081"
+      KC_HOSTNAME_ADMIN_URL: "http://localhost:8081"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
 
       KC_DB: postgres
       KC_DB_URL_HOST: keycloak-db
@@ -229,7 +266,7 @@ services:
       - coffre-fort-network
 
   # ---------------------------
-  # 7) OLLAMA (with GPU support)
+  # 7) OLLAMA (AI/LLM Service)
   # ---------------------------
   ollama:
     image: ollama/ollama:latest
@@ -240,7 +277,7 @@ services:
       - ollama_data:/root/.ollama
     networks:
       - coffre-fort-network
-    # GPU support for Windows Docker Desktop with WSL2
+    # GPU Support - NVIDIA GPU (requires nvidia-docker2)
     deploy:
       resources:
         reservations:
@@ -250,6 +287,7 @@ services:
               capabilities: [gpu]
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
+
 
   # ---------------------------
   # 8) BACKEND API (Node.js)
@@ -261,6 +299,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5000
+
+      # Redis Configuration (for caching, access grants, WebSocket pub/sub)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
 
       MAYAN_URL: http://mayan:8000
       MAYAN_USERNAME: admin
@@ -282,6 +324,9 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
 
+      # Frontend URL for WebSocket CORS
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+
     ports:
       - "5000:5000"
 
@@ -289,6 +334,7 @@ services:
       - mayan
       - keycloak
       - ollama
+      - redis
 
     networks:
       - coffre-fort-network

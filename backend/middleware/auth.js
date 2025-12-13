@@ -1,12 +1,8 @@
 const jwt = require('jsonwebtoken');
 const { getKey, KEYCLOAK_REALM } = require('../config/keycloak');
 
-// In-memory cache for public keys
-const keyCache = {};
-
 function getKeyPromise(header) {
   return new Promise((resolve, reject) => {
-    const { getKey } = require('../config/keycloak');
     getKey(header, (err, key) => {
       if (err) reject(err);
       else resolve(key);
@@ -24,13 +20,17 @@ async function verifyToken(token) {
     const key = await getKeyPromise(decoded.header);
 
     // Accept both localhost (browser) and keycloak (internal) issuers
+    const issuerFromEnv = process.env.KEYCLOAK_URL
+      ? `${process.env.KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`
+      : null;
+
     const validIssuers = [
-      `${process.env.KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`,
+      issuerFromEnv,
       `http://localhost:8080/realms/${KEYCLOAK_REALM}`,
       `http://127.0.0.1:8080/realms/${KEYCLOAK_REALM}`,
       `http://localhost:8081/realms/${KEYCLOAK_REALM}`,
       `http://127.0.0.1:8081/realms/${KEYCLOAK_REALM}`
-    ];
+    ].filter(Boolean);
 
     const verified = jwt.verify(token, key, {
       algorithms: ['RS256'],
@@ -43,35 +43,84 @@ async function verifyToken(token) {
   }
 }
 
-function extractToken(req) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
+function _firstQueryValue(value) {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function extractTokenWithSource(req) {
+  // Support query param tokens for iframe/img requests (e.g. /documents/:id/preview?token=...)
+  // Browsers do not send custom Authorization headers for <iframe>/<img>.
+  const queryTokenRaw =
+    _firstQueryValue(req.query?.token) ??
+    _firstQueryValue(req.query?.access_token) ??
+    _firstQueryValue(req.query?.accessToken) ??
+    _firstQueryValue(req.query?.jwt);
+
+  if (typeof queryTokenRaw === 'string' && queryTokenRaw.trim()) {
+    return { token: queryTokenRaw.trim(), source: 'query' };
   }
-  return authHeader.substring(7);
+
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+  if (typeof authHeader === 'string') {
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (match?.[1]?.trim()) {
+      return { token: match[1].trim(), source: 'authorization' };
+    }
+  }
+
+  const xAccessToken = req.headers['x-access-token'];
+  if (typeof xAccessToken === 'string' && xAccessToken.trim()) {
+    return { token: xAccessToken.trim(), source: 'x-access-token' };
+  }
+
+  return { token: null, source: null };
 }
 
 async function authenticate(req, res, next) {
   try {
-    console.log('[AUTH] Authenticating request to:', req.path);
-
-    const token = extractToken(req);
+    const { token, source } = extractTokenWithSource(req);
     if (!token) {
-      console.log('[AUTH] No token found in request');
-      return res.status(401).json({ error: 'No token provided' });
+      const debug = process.env.NODE_ENV === 'development'
+        ? {
+            method: req.method,
+            path: req.path,
+            originalUrl: req.originalUrl,
+            queryKeys: Object.keys(req.query || {}),
+            hasAuthHeader: !!(req.headers.authorization || req.headers.Authorization),
+            hasReferer: !!req.headers.referer,
+            hasOrigin: !!req.headers.origin
+          }
+        : undefined;
+
+      return res.status(401).json({
+        error: 'No token provided',
+        ...(debug ? { debug } : {})
+      });
     }
 
-    console.log('[AUTH] Token found:', token.substring(0, 50) + '...');
-    console.log('[AUTH] Verifying token...');
-
     const decoded = await verifyToken(token);
-    console.log('[AUTH] Token verified successfully. User:', decoded.email);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[AUTH] Token verified via ${source || 'unknown'} for user: ${decoded.email || decoded.preferred_username || decoded.sub}`);
+    }
 
+    // Set user info from JWT
     req.user = {
       id: decoded.sub,
       email: decoded.email,
       username: decoded.preferred_username,
       roles: decoded.realm_access?.roles || []
+    };
+
+    // Set userContext for Mayan per-user authentication (True SSO)
+    // This is passed to mayanService for per-user API tokens
+    req.userContext = {
+      userId: decoded.sub,
+      email: decoded.email,
+      username: decoded.preferred_username,
+      roles: decoded.realm_access?.roles || [],
+      firstName: decoded.given_name || '',
+      lastName: decoded.family_name || ''
     };
 
     next();

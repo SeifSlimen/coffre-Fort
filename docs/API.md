@@ -190,6 +190,10 @@ Authorization: Bearer <token>
 }
 ```
 
+### Force Mayan ACL Sync
+- **POST** `/api/admin/acl-sync/trigger`
+- **Description:** Immediately mirror Redis grants into Mayan ACLs (admin only). Useful to avoid waiting for the periodic sync.
+
 ## Error Responses
 
 All errors follow this format:

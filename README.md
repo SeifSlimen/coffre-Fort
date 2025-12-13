@@ -73,12 +73,10 @@ docker exec coffre-fort-ollama ollama pull llama3.2:3b
 
 ## 📖 Documentation
 
-- [SETUP.md](SETUP.md) - Detailed setup instructions
-- [QUICKSTART.md](QUICKSTART.md) - Quick start guide
+- [docs/SETUP.md](docs/SETUP.md) - Setup + smoke tests
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture
 - [docs/API.md](docs/API.md) - API documentation
 - [docs/TESTING.md](docs/TESTING.md) - Testing guide
-- [docs/DEMO.md](docs/DEMO.md) - Demo script
 
 ## 👥 Access Control & Permissions
 
@@ -163,6 +161,16 @@ npm start
 
 ## 🔧 Configuration
 
+### Mayan Link (Fix “Mayan doesn’t open”)
+
+The frontend Mayan button is now configurable.
+
+- Local default: `http://localhost:8000`
+- For non-local deployments, set `REACT_APP_MAYAN_URL` to the public Mayan URL (browser-accessible).
+
+The "Open Mayan EDMS" button opens:
+- `${REACT_APP_MAYAN_URL}/oidc/authenticate/`
+
 ### GPU Support (NVIDIA)
 
 GPU acceleration is enabled by default for Ollama. Requirements:
@@ -188,6 +196,7 @@ Change the model in `docker-compose.yml` under `OLLAMA_MODEL`.
 coffre-Fort/
 ├── backend/           # Node.js API server
 │   ├── config/        # Configuration files
+│   ├── tests/         # Smoke tests
 │   ├── middleware/    # Auth middleware
 │   ├── routes/        # API routes
 │   ├── services/      # Business logic
@@ -196,7 +205,7 @@ coffre-Fort/
 │   ├── public/        # Static files
 │   └── src/           # React components
 ├── keycloak/          # Keycloak realm config
-├── scripts/           # Utility scripts
+├── scripts/           # Utility scripts (admin password, pull model)
 ├── docs/              # Documentation
 └── docker-compose.yml # Container orchestration
 ```

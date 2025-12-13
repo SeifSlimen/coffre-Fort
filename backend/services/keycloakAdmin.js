@@ -9,6 +9,10 @@ class KeycloakAdminService {
   constructor() {
     this.accessToken = null;
     this.tokenExpiry = null;
+    // Cache for user roles to avoid N+1 queries
+    this.rolesCache = new Map();
+    this.rolesCacheExpiry = null;
+    this.ROLES_CACHE_TTL = 60 * 1000; // 1 minute cache
   }
 
   async getAdminToken() {
@@ -54,27 +58,36 @@ class KeycloakAdminService {
       const response = await axios.get(
         `${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}/users`,
         {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` },
+          params: { max: 1000 } // Fetch up to 1000 users
         }
       );
 
       console.log(`[Keycloak Admin] Found ${response.data.length} users`);
 
-      // Get role mappings for each user
-      const usersWithRoles = await Promise.all(
-        response.data.map(async (user) => {
-          const roles = await this.getUserRoles(user.id);
-          return {
-            id: user.id,
-            username: user.username,
-            email: user.email || '',
-            firstName: user.firstName || '',
-            lastName: user.lastName || '',
-            enabled: user.enabled,
-            roles: roles
-          };
-        })
-      );
+      // PERFORMANCE FIX: Batch fetch roles for all users in parallel with concurrency limit
+      const BATCH_SIZE = 10; // Fetch 10 user roles at a time
+      const users = response.data;
+      const usersWithRoles = [];
+      
+      for (let i = 0; i < users.length; i += BATCH_SIZE) {
+        const batch = users.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(
+          batch.map(async (user) => {
+            const roles = await this.getUserRoles(user.id);
+            return {
+              id: user.id,
+              username: user.username,
+              email: user.email || '',
+              firstName: user.firstName || '',
+              lastName: user.lastName || '',
+              enabled: user.enabled,
+              roles: roles
+            };
+          })
+        );
+        usersWithRoles.push(...batchResults);
+      }
 
       return usersWithRoles;
     } catch (error) {
@@ -85,6 +98,11 @@ class KeycloakAdminService {
 
   async getUserRoles(userId) {
     try {
+      // Check cache first
+      if (this.rolesCache.has(userId) && this.rolesCacheExpiry && Date.now() < this.rolesCacheExpiry) {
+        return this.rolesCache.get(userId);
+      }
+      
       const token = await this.getAdminToken();
       
       const response = await axios.get(
@@ -94,7 +112,13 @@ class KeycloakAdminService {
         }
       );
 
-      return response.data.map(role => role.name);
+      const roles = response.data.map(role => role.name);
+      
+      // Cache the result
+      this.rolesCache.set(userId, roles);
+      this.rolesCacheExpiry = Date.now() + this.ROLES_CACHE_TTL;
+      
+      return roles;
     } catch (error) {
       console.error('[Keycloak Admin] Failed to get user roles:', error.response?.data || error.message);
       return [];
@@ -243,6 +267,9 @@ class KeycloakAdminService {
       );
 
       console.log(`[Keycloak Admin] Assigned role ${roleName} to user ${userId}`);
+      
+      // Clear roles cache for this user
+      this.rolesCache.delete(userId);
     } catch (error) {
       console.error('[Keycloak Admin] Failed to assign role:', error.response?.data || error.message);
       // Don't throw - user is created even if role assignment fails
